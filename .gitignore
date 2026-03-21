@@ -5,5 +5,17 @@ dist/
 *.js.map
 !jest.config.js
 .env
+.env.*
 .claude/
 original v1/
+
+# Yap data — NEVER commit
+*.keys.json
+keystore.json
+flock.json
+contacts.json
+blocklist.json
+registrations.json
+audit-*.log
+nests/
+~/.yap/

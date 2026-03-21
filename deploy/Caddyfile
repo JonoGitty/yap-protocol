@@ -1,0 +1,31 @@
+# Caddy reverse proxy config for self-hosted tree
+# Handles TLS automatically via Let's Encrypt
+#
+# Usage: caddy run --config deploy/Caddyfile
+# Requires: domain DNS pointing to your server
+
+tree.yap.dev {
+    # WebSocket proxy for agent connections
+    reverse_proxy localhost:8789
+
+    # Security headers
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "no-referrer"
+    }
+
+    # Rate limiting at proxy level
+    # (tree also rate-limits internally)
+}
+
+# Registration API on subdomain
+api.yap.dev {
+    reverse_proxy localhost:8790
+
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options "nosniff"
+    }
+}

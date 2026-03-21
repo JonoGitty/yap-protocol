@@ -24,7 +24,11 @@ const handle = process.env.YAP_HANDLE
   ?? userInfo().username
   ?? `user-${randomBytes(3).toString("hex")}`;
 
-// If no tree URL provided, we start our own embedded tree
+// Tree connection strategy:
+// 1. YAP_TREE_URL env var → use that (explicit external tree)
+// 2. Public tree at wss://tree.yap.dev → try that (when deployed)
+// 3. Fallback → start embedded local tree (development / offline)
+const PUBLIC_TREE_URL = "wss://tree.yap.dev";
 const externalTreeUrl = process.env.YAP_TREE_URL;
 const EMBEDDED_TREE_PORT = 18790 + Math.floor(Math.random() * 100);
 let embeddedTree: TreeInstance | null = null;
@@ -460,12 +464,26 @@ server.tool(
 // --- Start ---
 
 async function main() {
-  // Auto-start embedded tree if no external URL provided
+  // Tree connection strategy
   if (externalTreeUrl) {
+    // 1. Explicit URL from env
     treeUrl = externalTreeUrl;
   } else {
-    embeddedTree = createTree(EMBEDDED_TREE_PORT);
-    treeUrl = `ws://localhost:${EMBEDDED_TREE_PORT}`;
+    // 2. Try public tree, fall back to embedded
+    try {
+      const WebSocket = (await import("ws")).default;
+      await new Promise<void>((resolve, reject) => {
+        const ws = new WebSocket(PUBLIC_TREE_URL, { timeout: 3000 });
+        ws.on("open", () => { ws.close(); resolve(); });
+        ws.on("error", () => reject());
+        setTimeout(() => reject(), 3000);
+      });
+      treeUrl = PUBLIC_TREE_URL;
+    } catch {
+      // 3. Public tree unavailable — start embedded
+      embeddedTree = createTree(EMBEDDED_TREE_PORT);
+      treeUrl = `ws://localhost:${EMBEDDED_TREE_PORT}`;
+    }
   }
 
   agent = new YapAgent({
