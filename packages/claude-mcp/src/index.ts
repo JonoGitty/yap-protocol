@@ -12,10 +12,15 @@ import {
   type Intent,
 } from "../../sdk/src/index.js";
 import { createTree, type TreeInstance } from "../../tree/src/index.js";
+import { SlackNotifier } from "../../notify/src/slack.js";
 import { EventBuffer } from "./event-buffer.js";
 import { McpConsentPrompter } from "./mcp-consent.js";
 import { randomBytes } from "node:crypto";
 import { hostname, userInfo } from "node:os";
+
+// Slack integration (optional — only if SLACK_WEBHOOK_URL is set)
+const slackWebhookUrl = process.env.SLACK_WEBHOOK_URL;
+const slack = slackWebhookUrl ? new SlackNotifier({ webhookUrl: slackWebhookUrl }) : null;
 
 // --- Zero-config setup ---
 
@@ -583,6 +588,8 @@ async function main() {
     // "ask_first" — queue for approval
     if (!pendingApprovals.has(from)) {
       pendingApprovals.set(from, { threadId, intent: intentSummary, from });
+      // Notify Slack
+      slack?.notifyContactRequest(from, intentSummary);
       // Notify Claude about the pending request
       buffer.push("notifications", "context_received", {
         notification: true,
@@ -622,6 +629,8 @@ async function main() {
       needs: needs.map((n) => ({ field: n.field, reason: n.reason, priority: n.priority })),
     });
     respondFns.set(threadId, respond);
+    // Slack: notify about chirp
+    slack?.notifyChirp("an agent", threadId, needs.map((n) => ({ field: n.field, reason: n.reason, priority: n.priority })));
     buffer.push("notifications", "context_received", {
       notification: true,
       type: "chirp_received",
@@ -633,6 +642,10 @@ async function main() {
   agent.onLanding((threadId, proposal, decide) => {
     buffer.push(threadId, "landing_proposed", { proposal });
     decideFns.set(threadId, decide);
+    // Slack: send proposal with confirm/decline buttons
+    const branch = agent.getBranch(threadId);
+    const from = branch?.packets[0]?.from ?? "someone";
+    slack?.notifyLandingProposal(from, threadId, proposal.summary, proposal.details);
     buffer.push("notifications", "context_received", {
       notification: true,
       type: "landing_proposed",
@@ -643,6 +656,10 @@ async function main() {
 
   agent.onConfirmed((threadId) => {
     buffer.push(threadId, "confirmed", {});
+    const branch = agent.getBranch(threadId);
+    const from = branch?.packets[0]?.from ?? "someone";
+    const summary = branch?.packets.find((p) => p.proposal)?.proposal?.summary ?? "Agreement reached";
+    slack?.notifyCompleted(threadId, summary, from);
     buffer.push("notifications", "context_received", {
       notification: true,
       type: "confirmed",
@@ -653,6 +670,9 @@ async function main() {
 
   agent.onDeclined((threadId, reason) => {
     buffer.push(threadId, "declined", { reason });
+    const branch = agent.getBranch(threadId);
+    const from = branch?.packets[0]?.from ?? "someone";
+    slack?.notifyDeclined(threadId, reason, from);
     buffer.push("notifications", "context_received", {
       notification: true,
       type: "declined",

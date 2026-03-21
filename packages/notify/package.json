@@ -1,0 +1,15 @@
+{
+  "name": "@yap-protocol/notify",
+  "version": "0.1.0",
+  "description": "Notification service for Yap — Slack, webhooks, and more",
+  "type": "module",
+  "main": "./src/index.ts",
+  "license": "MIT",
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.5.13",
+    "typescript": "^5.7.0"
+  }
+}
