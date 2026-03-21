@@ -54,12 +54,24 @@ wss.on("connection", (ws, req) => {
       packet = JSON.parse(raw);
     } catch {
       console.error(`❌ Malformed JSON from ${agentHandle}`);
+      ws.send(JSON.stringify({
+        protocol: "yap/0.1",
+        type: "error",
+        error_code: "MALFORMED_PACKET",
+        message: "Could not parse packet as JSON",
+      }));
       return;
     }
 
     const target = packet.to;
     if (!target) {
       console.error(`❌ Packet from ${agentHandle} missing 'to' field`);
+      ws.send(JSON.stringify({
+        protocol: "yap/0.1",
+        type: "error",
+        error_code: "MISSING_RECIPIENT",
+        message: "Packet missing 'to' field",
+      }));
       return;
     }
 

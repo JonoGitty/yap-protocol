@@ -1,14 +1,10 @@
-import WebSocket from "ws";
 import readline from "node:readline";
 import {
-  createContextResponse,
-  createConfirmation,
-  createDecline,
-  type YapPacket,
+  YapAgent,
+  TerminalPrompter,
+  AutoPrompter,
+  type Proposal,
 } from "../../packages/sdk/src/index.js";
-
-const TREE_URL = "ws://localhost:8789";
-const HANDLE = "bob";
 
 function log(msg: string) {
   console.log(`\n🐤 [Bob] ${msg}`);
@@ -27,123 +23,96 @@ function prompt(question: string): Promise<string> {
   });
 }
 
-function connect(): Promise<WebSocket> {
-  return new Promise((resolve, reject) => {
-    const ws = new WebSocket(`${TREE_URL}?handle=${HANDLE}`);
-    ws.on("open", () => resolve(ws));
-    ws.on("error", reject);
-  });
-}
-
 async function main() {
+  const isInteractive = process.stdin.isTTY;
+  const userData: Record<string, unknown> = {
+    timezone: "Europe/London",
+    time_windows: ["18:30-21:00"],
+    general_availability: { friday: ["18:30-21:00"] },
+    dietary: "none",
+    location_preference: "within 20 min drive of Reading centre",
+  };
+
+  const agent = new YapAgent({
+    handle: "bob",
+    treeUrl: "ws://localhost:8789",
+    comfortZone: {
+      always_share: ["timezone", "general_availability", "time_windows"],
+      ask_first: ["dietary", "location_preference", "budget_range", "transport_mode"],
+      never_share: ["health_info", "financial_details", "work_schedule_internals"],
+    },
+    prompter: isInteractive ? new TerminalPrompter() : new AutoPrompter(userData),
+    userData,
+  });
+
   log("Connecting to tree...");
-  const ws = await connect();
+  await agent.connect();
   log("Connected as @bob, waiting for yaps...");
 
-  ws.on("message", async (data) => {
-    const packet = JSON.parse(data.toString()) as YapPacket;
-
-    if (packet.type === "context") {
-      // Received a context yap — show what Alice is proposing
-      log(`Incoming yap from ${packet.from}!`);
-      log(`  Intent: ${packet.intent?.summary}`);
-      log(`  Category: ${packet.intent?.category}`);
-
-      const ctx = packet.context ?? {};
-      log(`  Proposed date: ${ctx.proposed_date}`);
-      log(`  Time windows: ${JSON.stringify(ctx.time_windows)}`);
-      log(`  Location: ${ctx.location_preference}`);
-      log(`  Dietary: ${JSON.stringify(ctx.dietary)}`);
-      log(`  Budget: ${ctx.budget_range}`);
-      log(`  Party size: ${ctx.party_size}`);
-
-      if (packet.needs && packet.needs.length > 0) {
-        log("  Needs from me:");
-        for (const need of packet.needs) {
-          log(`    - ${need.field} (${need.priority}): ${need.reason}`);
-        }
+  // When Alice's initial context arrives, log it
+  agent.onContext((threadId, context) => {
+    if (Object.keys(context).length > 0) {
+      log("Incoming context:");
+      for (const [key, value] of Object.entries(context)) {
+        log(`  ${key}: ${JSON.stringify(value)}`);
       }
+    }
+  });
 
-      // Respond with Bob's context (hardcoded for Phase 1)
-      log("Responding with my context...");
-      const response = createContextResponse(
-        packet.thread_id,
-        "@bob",
-        "@alice",
-        {
-          time_windows: ["18:30-21:00"],
-          dietary: ["none"],
-          location_preference: "anywhere within 20 min drive of Reading centre",
-        },
-      );
+  // When a landing proposal arrives, show it and ask for confirmation
+  agent.onLanding(async (threadId, proposal, decide) => {
+    log("═══════════════════════════════════════");
+    log("  LANDING PROPOSAL");
+    log("═══════════════════════════════════════");
+    log(`  ${proposal.summary}`);
 
-      ws.send(JSON.stringify(response));
-      log("Sent context response → @alice");
-      log("  Time windows: 18:30-21:00");
-      log("  Dietary: none");
-      log("  Location: within 20 min drive of Reading");
-      log("Waiting for landing proposal...");
+    const d = proposal.details;
+    log(`  Venue: ${d.venue} (${d.venue_type})`);
+    log(`  Address: ${d.address}`);
+    log(`  Date: ${d.date}`);
+    log(`  Time: ${d.time}`);
+    log(`  Party size: ${d.party_size}`);
+    log(`  Est. cost: ${d.estimated_cost}`);
+
+    if (proposal.alternatives && proposal.alternatives.length > 0) {
+      log("  Alternatives:");
+      for (const alt of proposal.alternatives) {
+        log(`    - ${alt.summary} (${alt.reason})`);
+      }
     }
 
-    if (packet.type === "resolution") {
-      // Alice proposed a landing — show it and ask for confirmation
-      const proposal = packet.proposal;
-      if (!proposal) return;
-
-      log("═══════════════════════════════════════");
-      log("  LANDING PROPOSAL");
-      log("═══════════════════════════════════════");
-      log(`  ${proposal.summary}`);
-
-      const d = proposal.details;
-      log(`  Venue: ${d.venue} (${d.venue_type})`);
-      log(`  Address: ${d.address}`);
-      log(`  Date: ${d.date}`);
-      log(`  Time: ${d.time}`);
-      log(`  Party size: ${d.party_size}`);
-      log(`  Est. cost: ${d.estimated_cost}`);
-
-      if (proposal.alternatives && proposal.alternatives.length > 0) {
-        log("  Alternatives:");
-        for (const alt of proposal.alternatives) {
-          log(`    - ${alt.summary} (${alt.reason})`);
-        }
-      }
-
-      if (proposal.reasoning) {
-        log(`  Reasoning: ${proposal.reasoning}`);
-      }
-
-      log("═══════════════════════════════════════");
-
-      const answer = await prompt(
-        "\n  [1] Confirm  [2] Decline  > ",
-      );
-
-      if (answer === "1") {
-        const confirmation = createConfirmation(
-          packet.thread_id,
-          "@bob",
-          "@alice",
-        );
-        ws.send(JSON.stringify(confirmation));
-        log("Confirmed! Dinner sorted! 🍽️");
-        log("Branch completed ✅");
-      } else {
-        const decline = createDecline(
-          packet.thread_id,
-          "@bob",
-          "@alice",
-          "scheduling_conflict",
-        );
-        ws.send(JSON.stringify(decline));
-        log("Declined.");
-        log("Branch declined ❌");
-      }
-
-      ws.close();
-      process.exit(0);
+    if (proposal.reasoning) {
+      log(`  Reasoning: ${proposal.reasoning}`);
     }
+
+    log("═══════════════════════════════════════");
+
+    const answer = isInteractive
+      ? await prompt("\n  [1] Confirm  [2] Decline  > ")
+      : "1"; // auto-confirm in non-interactive mode
+
+    if (answer === "1") {
+      decide("confirm");
+      log("Confirmed! Dinner sorted! 🍽️");
+      log("Branch completed ✅");
+    } else {
+      decide("decline", "scheduling_conflict");
+      log("Declined.");
+      log("Branch declined ❌");
+    }
+
+    agent.disconnect();
+    process.exit(0);
+  });
+
+  agent.onStalled((threadId) => {
+    log(`Thread ${threadId} stalled — no response in time`);
+    agent.disconnect();
+    process.exit(1);
+  });
+
+  agent.onError((err) => {
+    log(`Error: ${err.message}`);
   });
 }
 

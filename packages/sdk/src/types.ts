@@ -11,7 +11,8 @@ export interface YapPacket {
     | "context_response"
     | "resolution"
     | "resolution_response"
-    | "intent_update";
+    | "intent_update"
+    | "error";
   intent?: Intent;
   context?: Record<string, unknown>;
   needs?: Need[];
@@ -76,4 +77,17 @@ export interface BranchState {
   packets: YapPacket[];
   created_at: string;
   updated_at: string;
+}
+
+export type YapErrorCode =
+  | "LOOP_LIMIT"
+  | "TIMEOUT"
+  | "MALFORMED"
+  | "DISCONNECTED"
+  | "SEND_FAILED";
+
+export interface YapError {
+  code: YapErrorCode;
+  thread_id?: string;
+  message: string;
 }

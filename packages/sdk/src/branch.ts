@@ -54,4 +54,34 @@ export class BranchManager {
   listBranches(): BranchState[] {
     return Array.from(this.branches.values());
   }
+
+  getRoundTripCount(threadId: string): number {
+    const branch = this.branches.get(threadId);
+    if (!branch) return 0;
+    const exchangeTypes = ["context", "context_request", "context_response"];
+    const count = branch.packets.filter((p) =>
+      exchangeTypes.includes(p.type),
+    ).length;
+    return Math.floor(count / 2);
+  }
+
+  getAnsweredFields(threadId: string): Map<string, "provided" | "declined"> {
+    const result = new Map<string, "provided" | "declined">();
+    const branch = this.branches.get(threadId);
+    if (!branch) return result;
+
+    for (const packet of branch.packets) {
+      if (packet.context_provided) {
+        for (const field of Object.keys(packet.context_provided)) {
+          result.set(field, "provided");
+        }
+      }
+      if (packet.context_unavailable) {
+        for (const item of packet.context_unavailable) {
+          result.set(item.field, "declined");
+        }
+      }
+    }
+    return result;
+  }
 }

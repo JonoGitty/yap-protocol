@@ -1,5 +1,4 @@
-import crypto from "node:crypto";
-import type { Need, Proposal, YapPacket } from "./types.js";
+import type { ContextUnavailable, Need, Proposal, YapPacket } from "./types.js";
 
 const PROTOCOL_VERSION = "yap/0.1";
 
@@ -115,6 +114,26 @@ export function createDecline(
   };
 }
 
+export function createContextResponseWithDeclines(
+  threadId: string,
+  from: string,
+  to: string,
+  contextProvided: Record<string, unknown>,
+  contextUnavailable: ContextUnavailable[],
+): YapPacket {
+  return {
+    protocol: PROTOCOL_VERSION,
+    packet_id: generateId("pkt"),
+    thread_id: threadId,
+    from,
+    to,
+    timestamp: new Date().toISOString(),
+    type: "context_response",
+    context_provided: contextProvided,
+    context_unavailable: contextUnavailable,
+  };
+}
+
 export function validateYap(yap: unknown): { valid: boolean; errors: string[] } {
   const errors: string[] = [];
 
@@ -138,6 +157,7 @@ export function validateYap(yap: unknown): { valid: boolean; errors: string[] } 
     "resolution",
     "resolution_response",
     "intent_update",
+    "error",
   ];
   if (!validTypes.includes(p.type as string)) {
     errors.push(`Invalid 'type' field: ${p.type}. Must be one of: ${validTypes.join(", ")}`);
