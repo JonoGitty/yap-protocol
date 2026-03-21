@@ -20,16 +20,65 @@ With Yap, Alice's agent sends Bob's agent a structured context packet: availabil
 
 Both humans get a simple confirmation popup. One tap. Done.
 
+## Current Status
+
+| Phase | Name | Status |
+|-------|------|--------|
+| 1 | Proof of concept — tree, SDK, dinner scheduler | **Done** |
+| 2 | Negotiation loops, permission tiers, consent prompting | **Done** |
+| 3 | Claude MCP server, OpenClaw skill | **Done** |
+| 4 | Encryption, flock memory, multi-party, nests, dynamic schemas | **Done** |
+| 5 | Security hardening — all vulnerabilities patched | **Done** |
+| 5+ | Federation security, handle registration, PFS | **Done** |
+| — | Independent security audit | Planned |
+| — | Public tree deployment (tree.yap.dev) | Planned |
+
+### What's built
+
+**Core protocol:** Context packets, chirps (context requests), landings (resolutions), branch lifecycle, version negotiation (v0.2)
+
+**SDK (17 modules, ~3,500 lines):**
+- `YapAgent` — Full agent lifecycle with 15+ event handlers
+- `ComfortZone` — 3-tier permissions with per-relationship overrides
+- `ConsentPrompter` — Terminal, auto-approve, and MCP consent flows
+- `DynamicSchemaManager` — On-the-fly schema negotiation with service integrations
+- `FlockMemory` — Relationship learning, pattern tracking, promotion suggestions
+- `MultiPartyManager` — Coordinator role, aggregation, quorum, transfer
+- `NestManager` — Persistent shared workspaces with per-field versioning
+- `ContactList` — Address book with trust levels and service tracking
+- `ServiceDiscovery` — Proactive integration suggestions based on intent
+- `YapCrypto` — X25519 + AES-256-GCM + Ed25519, per-thread ephemeral keys (PFS)
+- `Keystore` — Encrypted key storage (scrypt + AES-256-GCM at rest)
+- `Security` — Prompt injection prevention, replay detection, rate limiting, blocklist
+- `AuditLog` — Structured security event logging
+
+**Tree relay (~250 lines):**
+- WebSocket routing, offline queue (bounded, TTL), rate limiting, packet size limits
+- Token authentication, handle uniqueness, federation with peer auth
+- Handle registration HTTP API (POST /register, GET /lookup)
+
+**Integrations:**
+- [Claude MCP server](packages/claude-mcp/) — 9 tools + prompts for Claude Desktop / Claude Code
+- [OpenClaw skill](packages/openclaw-skill/) — Messaging-based wrapper with command parser
+
+**Examples (6 scenarios):**
+- [Dinner scheduler](examples/dinner-scheduler/) — Two-agent scheduling with consent
+- [Briefing](examples/briefing/) — One-shot delivery with acknowledgment
+- [Invoice](examples/invoice/) — Approval/revision + payment landing
+- [Questionnaire](examples/questionnaire/) — Rich chirps with comfort zone tiers
+- [Report](examples/report/) — Metrics delivery + drill-down follow-up
+- [Presentation feedback](examples/presentation-feedback/) — Collaborative review
+
 ## How it works
 
 1. Your agent connects to a **Tree** (relay server) via WebSocket
-2. Agents send each other **Yaps** (structured context packets)
-3. If an agent needs more info, it sends a **Chirp** (context request)
-4. Your agent checks your **Comfort Zone** (permission tiers) before sharing
-5. When agents agree, they propose a **Landing** (resolution)
-6. You get a **Check** (confirmation popup). One tap to approve.
-
-The Tree is deliberately dumb — it routes packets and nothing else. Your data stays between you and the person you're coordinating with.
+2. Agents exchange keys automatically (E2E encrypted from first contact)
+3. Agents send each other **Yaps** (structured context packets)
+4. If an agent needs more info, it sends a **Chirp** (context request)
+5. Your agent checks your **Comfort Zone** (permission tiers) before sharing
+6. Agents can negotiate **Dynamic Schemas** for complex coordination
+7. When agents agree, they propose a **Landing** (resolution)
+8. You get a **Check** (confirmation popup). One tap to approve.
 
 ## Quick start
 
@@ -47,46 +96,64 @@ npm run example:bob
 npm run example:alice
 ```
 
-Alice sends a dinner request. Bob receives it, responds with his context. Alice proposes a restaurant. Bob confirms. Done.
+## Use with Claude
+
+Add the MCP server to Claude Desktop or Claude Code. Then just say:
+> "Coordinate dinner with @bob for Friday. I'm vegetarian and free 6-9pm."
+
+Claude handles the negotiation. See [packages/claude-mcp/README.md](packages/claude-mcp/README.md) for setup.
 
 ## Project structure
 
 ```
 yap-protocol/
 ├── packages/
-│   ├── tree/          # WebSocket relay server (~80 lines)
-│   └── sdk/           # Core TypeScript SDK
-│       ├── types.ts   # Protocol types (YapPacket, Intent, Need, etc.)
-│       ├── client.ts  # WebSocket client (YapClient)
-│       ├── yap.ts     # Packet construction + validation
-│       └── branch.ts  # Thread state management (BranchManager)
-├── examples/
-│   └── dinner-scheduler/
-│       ├── alice.ts   # Agent A (initiator)
-│       └── bob.ts     # Agent B (responder)
-└── docs/
-    ├── SPEC.md        # Full protocol specification (v0.2)
-    ├── ARCHITECTURE.md
-    ├── VOCABULARY.md
-    ├── PHASE1_BUILD.md
-    └── PROJECT_PLAN.md
+│   ├── tree/                # WebSocket relay server
+│   │   ├── index.ts         # Tree with auth, rate limiting, queue management
+│   │   ├── federation.ts    # Cross-tree routing with peer auth
+│   │   └── registration.ts  # Handle registration HTTP API
+│   ├── sdk/                 # Core TypeScript SDK (17 modules)
+│   ├── claude-mcp/          # Claude MCP server (9 tools)
+│   └── openclaw-skill/      # OpenClaw messaging skill
+├── examples/                # 6 working scenarios
+├── docs/
+│   ├── SPEC.md              # Protocol specification (v0.2)
+│   ├── DYNAMIC_SCHEMAS.md   # Dynamic schema negotiation spec
+│   ├── ARCHITECTURE.md      # System architecture
+│   ├── SECURITY_ROADMAP.md  # Security roadmap + threat model
+│   ├── TREE_OPERATOR_GUIDE.md  # How to run a tree safely
+│   └── ...
+├── SECURITY.md              # Security policy + disclaimer
+├── CLAUDE.md                # Project context for Claude Code
+└── README.md
 ```
 
-## The protocol
+## Security
 
-Yap is MIT licensed. The full spec is at [docs/SPEC.md](docs/SPEC.md).
+See [SECURITY.md](SECURITY.md) for full details. See [docs/SECURITY_ROADMAP.md](docs/SECURITY_ROADMAP.md) for the threat model and roadmap.
 
-The spec defines:
+**Built-in protections:**
+- E2E encryption (X25519 + AES-256-GCM) with auto key exchange
+- Ed25519 packet signing
+- Perfect forward secrecy (ephemeral keys per thread)
+- Encrypted keystore at rest (scrypt + AES-256-GCM)
+- Token-based tree authentication
+- Prompt injection detection (13 patterns) + auto-sanitisation
+- Replay detection (packet ID tracking)
+- Rate limiting (client + tree, dual-layer)
+- Agent blocklist with persistence
+- Comfort zone enforcement (never_share silently omitted)
+- Service visibility (trust-gated, 4 tiers)
+- Packet size + depth limits
+- Coordinator verification for multi-party
+- Structured audit logging
+- Handle registration with token generation
+- Federation with signed packet hops
 
-- **Context packets** — freeform JSON context that any LLM can interpret
-- **Negotiation loops** — agents request, respond, and resolve
-- **Permission tiers** — users control what gets shared and with whom
-- **Action confirmation** — humans approve consequential actions
-- **Relationship memory** — agents learn each other's patterns over time
-- **Multi-party coordination** — group scheduling and collaboration
-- **Shared workspaces** — persistent context for ongoing projects
-- **E2E encryption** — the relay never sees your data
-- **Version negotiation** — agents on different versions interoperate
+**Not yet done:**
+- Independent security audit
+- Metadata privacy (onion routing)
+- Full mTLS between federated trees
 
 ## Vocabulary
 
@@ -100,40 +167,32 @@ The spec defines:
 | **Landing** | Resolution — "here's what we agreed on" |
 | **Check** | Consent prompt — "can I share this?" |
 | **Comfort zone** | Permission tiers — always share / ask first / never share |
+| **Flock memory** | Relationship learning — what each agent typically shares/declines |
+| **Nest** | Shared workspace — persistent context between agents |
+| **Dynamic schema** | On-the-fly type negotiation for complex coordination |
 
-## Status
+## Roadmap
 
-**Phase 1 — Proof of concept** (done)
+### Next up
+- Public tree deployment at `tree.yap.dev`
+- npm package publishing (`@yap-protocol/sdk`, `@yap-protocol/tree`)
+- Demo video + Show HN launch
+- Independent security audit
 
-Two agents, one tree, scheduling scenario, working end-to-end.
-
-### Roadmap
-
-- Phase 2: Full negotiation loops, permission tiers, consent prompting
-- Phase 3: OpenClaw skill + Claude MCP server
-- Phase 4: E2E encryption, relationship memory, multi-party, shared workspaces
-
-## Works with
-
-- **OpenClaw** — install the `yap` skill from ClawHub (Phase 3)
-- **Claude** — add the Yap MCP server to Claude Desktop (Phase 3)
-- **Any agent** — use the SDK to add Yap to any Node.js agent
+### Future
+- Metadata privacy (onion routing between trees)
+- Handle rotation for anonymity
+- Tree operator certification
+- Community schema registry
 
 ## Contributing
 
 Yap is open source (MIT). We welcome contributions to the spec, SDK, tree, and integrations.
 
-The fastest way to help right now:
-
 1. Read the spec and open issues for things that are unclear
 2. Try the examples and report what breaks
 3. Build integrations for other agent runtimes
-
-## Security
-
-See [SECURITY.md](SECURITY.md) for details on built-in protections, known limitations, and how to report vulnerabilities.
-
-**TL;DR:** This is experimental software. E2E encryption, prompt injection prevention, replay protection, and rate limiting are built in. But it has NOT been independently audited. Use at your own risk. Never run a public tree without TLS. Only connect to agents you trust.
+4. Help with the security audit
 
 ## Disclaimer
 

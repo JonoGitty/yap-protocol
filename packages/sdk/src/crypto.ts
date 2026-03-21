@@ -40,6 +40,54 @@ export function generateSigningKeyPair(): KeyPair {
   };
 }
 
+// --- Perfect forward secrecy: ephemeral keys per thread ---
+
+export interface EphemeralSession {
+  threadId: string;
+  ephemeralKeyPair: KeyPair;
+  sessionKey: Buffer | null; // Derived once peer ephemeral received
+  peerEphemeralPublic: string | null;
+}
+
+const ephemeralSessions = new Map<string, EphemeralSession>();
+
+/** Generate an ephemeral key pair for a thread. Provides PFS. */
+export function createEphemeralSession(threadId: string): EphemeralSession {
+  const ephemeralKeyPair = generateEncryptionKeyPair();
+  const session: EphemeralSession = {
+    threadId,
+    ephemeralKeyPair,
+    sessionKey: null,
+    peerEphemeralPublic: null,
+  };
+  ephemeralSessions.set(threadId, session);
+  return session;
+}
+
+/** Complete an ephemeral session with the peer's ephemeral public key. */
+export function completeEphemeralSession(threadId: string, peerEphemeralPublic: string): Buffer {
+  const session = ephemeralSessions.get(threadId);
+  if (!session) throw new Error(`No ephemeral session for thread ${threadId}`);
+  session.peerEphemeralPublic = peerEphemeralPublic;
+  session.sessionKey = deriveSharedSecret(session.ephemeralKeyPair.secretKey, peerEphemeralPublic);
+  return session.sessionKey;
+}
+
+/** Get the session key for a thread (for encrypt/decrypt). */
+export function getSessionKey(threadId: string): Buffer | null {
+  return ephemeralSessions.get(threadId)?.sessionKey ?? null;
+}
+
+/** Get the ephemeral public key for a thread (to send to peer). */
+export function getEphemeralPublic(threadId: string): string | null {
+  return ephemeralSessions.get(threadId)?.ephemeralKeyPair.publicKey ?? null;
+}
+
+/** Clean up a session when thread completes. */
+export function destroyEphemeralSession(threadId: string): void {
+  ephemeralSessions.delete(threadId);
+}
+
 // --- Shared secret derivation ---
 
 export function deriveSharedSecret(mySecretKey: string, theirPublicKey: string): Buffer {

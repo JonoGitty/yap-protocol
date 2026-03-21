@@ -50,6 +50,9 @@ export interface YapPacket {
   public_encryption_key?: string;
   public_signing_key?: string;
 
+  // Perfect forward secrecy
+  ephemeral_public_key?: string;
+
   // Nests (Step 8)
   nest_id?: string;
   nest_fields?: Record<string, unknown>;

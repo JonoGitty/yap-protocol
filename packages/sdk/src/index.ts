@@ -51,6 +51,12 @@ export {
   verify,
   encryptPacket,
   decryptPacket,
+  createEphemeralSession,
+  completeEphemeralSession,
+  getSessionKey,
+  getEphemeralPublic,
+  destroyEphemeralSession,
+  type EphemeralSession,
 } from "./crypto.js";
 export { Keystore } from "./keystore.js";
 export { ContactList } from "./contacts.js";
