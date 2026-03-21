@@ -1,4 +1,5 @@
-import { randomBytes, createCipheriv, createDecipheriv, createHash } from "node:crypto";
+import crypto from "node:crypto";
+const { randomBytes, createCipheriv, createDecipheriv, createHash, generateKeyPairSync, createPrivateKey, createPublicKey, diffieHellman, sign: cryptoSign, verify: cryptoVerify } = crypto;
 import type { YapPacket } from "./types.js";
 
 /**
@@ -19,7 +20,7 @@ export interface KeyPair {
 }
 
 export function generateEncryptionKeyPair(): KeyPair {
-  const { publicKey, privateKey } = require("node:crypto").generateKeyPairSync("x25519", {
+  const { publicKey, privateKey } = generateKeyPairSync("x25519", {
     publicKeyEncoding: { type: "spki", format: "der" },
     privateKeyEncoding: { type: "pkcs8", format: "der" },
   });
@@ -30,7 +31,7 @@ export function generateEncryptionKeyPair(): KeyPair {
 }
 
 export function generateSigningKeyPair(): KeyPair {
-  const { publicKey, privateKey } = require("node:crypto").generateKeyPairSync("ed25519", {
+  const { publicKey, privateKey } = generateKeyPairSync("ed25519", {
     publicKeyEncoding: { type: "spki", format: "der" },
     privateKeyEncoding: { type: "pkcs8", format: "der" },
   });
@@ -91,18 +92,17 @@ export function destroyEphemeralSession(threadId: string): void {
 // --- Shared secret derivation ---
 
 export function deriveSharedSecret(mySecretKey: string, theirPublicKey: string): Buffer {
-  const crypto = require("node:crypto");
-  const myKey = crypto.createPrivateKey({
+  const myKey = createPrivateKey({
     key: Buffer.from(mySecretKey, "base64"),
     format: "der",
     type: "pkcs8",
   });
-  const theirKey = crypto.createPublicKey({
+  const theirKey = createPublicKey({
     key: Buffer.from(theirPublicKey, "base64"),
     format: "der",
     type: "spki",
   });
-  const shared = crypto.diffieHellman({ privateKey: myKey, publicKey: theirKey });
+  const shared = diffieHellman({ privateKey: myKey, publicKey: theirKey });
   // Hash the shared secret for use as AES key
   return createHash("sha256").update(shared).digest();
 }
@@ -144,24 +144,22 @@ export function decrypt(payload: EncryptedPayload, sharedSecret: Buffer): string
 // --- Signing (Ed25519) ---
 
 export function sign(data: string, secretKey: string): string {
-  const crypto = require("node:crypto");
-  const key = crypto.createPrivateKey({
+  const key = createPrivateKey({
     key: Buffer.from(secretKey, "base64"),
     format: "der",
     type: "pkcs8",
   });
-  const signature = crypto.sign(null, Buffer.from(data), key);
+  const signature = cryptoSign(null, Buffer.from(data), key);
   return signature.toString("base64");
 }
 
 export function verify(data: string, signature: string, publicKey: string): boolean {
-  const crypto = require("node:crypto");
-  const key = crypto.createPublicKey({
+  const key = createPublicKey({
     key: Buffer.from(publicKey, "base64"),
     format: "der",
     type: "spki",
   });
-  return crypto.verify(null, Buffer.from(data), key, Buffer.from(signature, "base64"));
+  return cryptoVerify(null, Buffer.from(data), key, Buffer.from(signature, "base64"));
 }
 
 // --- Packet encryption helpers ---
