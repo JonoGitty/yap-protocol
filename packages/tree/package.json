@@ -1,0 +1,14 @@
+{
+  "name": "@yap-protocol/tree",
+  "version": "0.1.0",
+  "description": "Yap relay server (the tree)",
+  "type": "module",
+  "main": "./src/index.ts",
+  "license": "MIT",
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.5.13"
+  }
+}

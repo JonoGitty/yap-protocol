@@ -1,0 +1,19 @@
+{
+  "name": "yap-protocol",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "examples/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "tree": "npx tsx packages/tree/src/index.ts",
+    "example:alice": "npx tsx examples/dinner-scheduler/alice.ts",
+    "example:bob": "npx tsx examples/dinner-scheduler/bob.ts"
+  },
+  "devDependencies": {
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
+  }
+}
