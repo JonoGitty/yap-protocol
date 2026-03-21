@@ -1,8 +1,8 @@
 # Fly.io deployment config for Yap tree
-# Deploy with: fly deploy --config deploy/fly.toml
+# Deploy with: fly deploy --config deploy/fly.toml --dockerfile deploy/Dockerfile
 
 app = "yap-tree"
-primary_region = "lhr" # London — change to your preferred region
+primary_region = "lhr"
 
 [build]
   dockerfile = "deploy/Dockerfile"
@@ -10,12 +10,18 @@ primary_region = "lhr" # London — change to your preferred region
 [env]
   NODE_ENV = "production"
   YAP_PORT = "8789"
-  # NOTE: Auth tokens, invite codes, and secrets are set via
-  # fly secrets — NEVER put them here. See deploy/README.md.
+  YAP_API_PORT = "8790"
+  YAP_DATA_DIR = "/data"
+
+[mounts]
+  source = "yap_data"
+  destination = "/data"
 
 [[services]]
   internal_port = 8789
   protocol = "tcp"
+  auto_stop_machines = false
+  auto_start_machines = true
 
   [[services.ports]]
     port = 443
@@ -29,15 +35,6 @@ primary_region = "lhr" # London — change to your preferred region
     type = "connections"
     hard_limit = 2000
     soft_limit = 1000
-
-# Registration API
-[[services]]
-  internal_port = 8790
-  protocol = "tcp"
-
-  [[services.ports]]
-    port = 8790
-    handlers = ["tls", "http"]
 
 [checks]
   [checks.health]

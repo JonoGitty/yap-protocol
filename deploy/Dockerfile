@@ -2,25 +2,30 @@ FROM node:22-alpine
 
 WORKDIR /app
 
-# Copy only what the tree needs
-COPY packages/tree/ packages/tree/
-COPY packages/sdk/ packages/sdk/
+# Copy package files first for layer caching
 COPY package.json package-lock.json tsconfig.json ./
+COPY packages/tree/package.json packages/tree/
+COPY packages/sdk/package.json packages/sdk/
+COPY packages/notify/package.json packages/notify/
 
 # Install deps
-RUN npm ci --omit=dev
+RUN npm ci --omit=dev 2>/dev/null || npm install --omit=dev
 
-# Install tsx for running TypeScript directly
+# Copy source
+COPY packages/tree/ packages/tree/
+COPY packages/sdk/ packages/sdk/
+COPY packages/notify/ packages/notify/
+
+# Install tsx globally for running TypeScript
 RUN npm install -g tsx
 
-# Non-root user for security
+# Non-root user
 RUN adduser -D -u 1001 yaptree
+RUN mkdir -p /data && chown yaptree:yaptree /data
 USER yaptree
 
-# Tree listens on 8789, registration API on 8790
 EXPOSE 8789 8790
 
-# Health check
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
   CMD wget -qO- http://localhost:8790/info || exit 1
 
