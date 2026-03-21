@@ -71,8 +71,8 @@ Add a volume mount to `fly.toml` for registration data:
 ### Custom Domain
 
 ```bash
-fly certs add tree.yap.dev
-# Then add CNAME: tree.yap.dev → yap-tree.fly.dev
+fly certs add tree.yapprotocol.dev
+# Then add CNAME: tree.yapprotocol.dev → yap-tree.fly.dev
 ```
 
 ## Deploy to VPS (Hetzner/DigitalOcean)

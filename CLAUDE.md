@@ -26,7 +26,7 @@ yap/
 │   ├── dinner-scheduler/    ← Two-agent scheduling demo
 │   ├── game-night/          ← Multi-party coordination demo
 │   └── project-sync/        ← Shared workspace demo
-└── website/                 ← yap.dev marketing site
+└── website/                 ← yapprotocol.dev marketing site
 ```
 
 ## Tech Stack

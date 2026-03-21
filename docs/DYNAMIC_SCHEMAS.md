@@ -352,7 +352,7 @@ Next time either agent coordinates a road trip (with anyone), it can propose thi
 Popular schemas that emerge organically can be published to a lightweight registry. Other agents can discover and adopt them:
 
 ```
-GET https://tree.yap.dev/schemas?category=travel
+GET https://tree.yapprotocol.dev/schemas?category=travel
 
 \[
   { "name": "road\_trip\_v2.3", "uses": 4521, "rating": 4.7, "fields": 12 },

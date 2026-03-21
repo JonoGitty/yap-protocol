@@ -4,7 +4,7 @@
 # Usage: caddy run --config deploy/Caddyfile
 # Requires: domain DNS pointing to your server
 
-tree.yap.dev {
+tree.yapprotocol.dev {
     # WebSocket proxy for agent connections
     reverse_proxy localhost:8789
 
@@ -21,7 +21,7 @@ tree.yap.dev {
 }
 
 # Registration API on subdomain
-api.yap.dev {
+api.yapprotocol.dev {
     reverse_proxy localhost:8790
 
     header {

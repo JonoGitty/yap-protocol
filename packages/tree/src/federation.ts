@@ -2,7 +2,7 @@ import WebSocket from "ws";
 import { createHash, randomBytes } from "node:crypto";
 
 export interface FederationConfig {
-  /** This tree's domain (e.g., "tree.yap.dev") */
+  /** This tree's domain (e.g., "tree.yapprotocol.dev") */
   domain: string;
   /** Allowed peer tree domains with their auth tokens */
   peers: Record<string, { token: string; url?: string }>;

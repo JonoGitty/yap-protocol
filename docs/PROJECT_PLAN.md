@@ -21,7 +21,7 @@ Everything in the Yap ecosystem uses consistent, memorable language:
 | Context packet | **Yap** | A structured blob of context sent between agents |
 | Relay server | **The Tree** | The server that routes yaps between agents |
 | Thread | **Branch** | A conversation thread between agents |
-| Agent address | **Handle** | Your agent's address (e.g. `@jono` on `yap.dev`) |
+| Agent address | **Handle** | Your agent's address (e.g. `@jono` on `yapprotocol.dev`) |
 | Context request | **Chirp** | When an agent asks for more context |
 | Resolution | **Landing** | When agents agree on an outcome |
 | Consent prompt | **Check** | A popup asking the user to approve sharing something |
@@ -105,7 +105,7 @@ yapprotocol/
 │       ├── feature_request.md
 │       └── protocol_change.md
 │
-└── website                 # yap.dev marketing site
+└── website                 # yapprotocol.dev marketing site
     ├── index.html
     └── docs/
 ```
@@ -252,7 +252,7 @@ Claude Desktop doesn't run OpenClaw. MCP is Claude's native extension mechanism.
 
 User sends their OpenClaw agent (via WhatsApp, Telegram, etc.): "install yap"
 
-OpenClaw fetches the skill from ClawHub, installs it, and connects to the default public tree at `wss://tree.yap.dev`.
+OpenClaw fetches the skill from ClawHub, installs it, and connects to the default public tree at `wss://tree.yapprotocol.dev`.
 
 ### How it works for an OpenClaw user
 
@@ -290,7 +290,7 @@ User replies "1" and the skill continues.
 
 ### Public tree
 
-Yap ships with a default public tree at `tree.yap.dev` for getting started. Free tier, rate limited, no SLA. Good enough for personal use and testing.
+Yap ships with a default public tree at `tree.yapprotocol.dev` for getting started. Free tier, rate limited, no SLA. Good enough for personal use and testing.
 
 ### Self-hosted tree
 
@@ -304,7 +304,7 @@ Or deploy to any VPS, Cloudflare Workers, fly.io, Railway, etc.
 
 ### Tree federation (Phase 4+)
 
-Like email servers, trees can federate. `@alice@tree.yap.dev` can yap at `@bob@company-tree.example.com`. The trees route between each other.
+Like email servers, trees can federate. `@alice@tree.yapprotocol.dev` can yap at `@bob@company-tree.example.com`. The trees route between each other.
 
 This means no single entity controls the network. Companies can run private trees for internal use while still interoperating with the public network.
 
@@ -316,7 +316,7 @@ This means no single entity controls the network. Companies can run private tree
 2. Publish spec repo with full v0.2 specification
 3. Publish a clean README with the "problem → fix → how it works" structure
 4. Post to OpenClaw Discord for early feedback on the spec
-5. Create a simple landing page at yap.dev (or yapprotocol.dev)
+5. Create a simple landing page at yapprotocol.dev (or yapprotocol.dev)
 
 ### Week 2-3: Phase 1 Build
 
@@ -362,10 +362,10 @@ This means no single entity controls the network. Companies can run private tree
 
 Priority order:
 
-1. `yap.dev` — cleanest possible. Premium but worth it if available.
+1. `yapprotocol.dev` — cleanest possible. Premium but worth it if available.
 2. `yapprotocol.dev` — clear, available as a backup
-3. `getyap.dev` — action-oriented alternative
-4. `useyap.dev` — same energy
+3. `getyapprotocol.dev` — action-oriented alternative
+4. `useyapprotocol.dev` — same energy
 
 ### Accounts to create
 
@@ -431,7 +431,7 @@ Moltbook went from launch to Meta acquisition in 7 weeks. If Yap gets traction, 
 
 1. **Create GitHub org** — `yapprotocol`
 2. **Register npm org** — `@yap-protocol`
-3. **Buy domain** — check yap.dev availability
+3. **Buy domain** — check yapprotocol.dev availability
 4. **Publish spec** — clean up v0.2 spec with Yap vocabulary
 5. **Start building Phase 1** — tree + SDK + dinner example
 6. **Record demo** — 60 seconds showing two agents scheduling dinner

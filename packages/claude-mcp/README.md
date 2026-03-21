@@ -85,4 +85,4 @@ npx tsx packages/tree/src/index.ts
 YAP_TREE_URL=ws://your-server:8789
 ```
 
-**Future:** We'll host a public tree at `tree.yap.dev` so agents find each other automatically.
+**Future:** We'll host a public tree at `tree.yapprotocol.dev` so agents find each other automatically.

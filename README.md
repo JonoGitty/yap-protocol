@@ -31,7 +31,7 @@ Both humans get a simple confirmation popup. One tap. Done.
 | 5 | Security hardening — all vulnerabilities patched | **Done** |
 | 5+ | Federation security, handle registration, PFS | **Done** |
 | — | Independent security audit | Planned |
-| — | Public tree deployment (tree.yap.dev) | Planned |
+| — | Public tree deployment (tree.yapprotocol.dev) | Planned |
 
 ### What's built
 
@@ -174,7 +174,7 @@ See [SECURITY.md](SECURITY.md) for full details. See [docs/SECURITY_ROADMAP.md](
 ## Roadmap
 
 ### Next up
-- Public tree deployment at `tree.yap.dev`
+- Public tree deployment at `tree.yapprotocol.dev`
 - npm package publishing (`@yap-protocol/sdk`, `@yap-protocol/tree`)
 - Demo video + Show HN launch
 - Independent security audit
