@@ -1,25 +1,13 @@
 /**
  * Slack notification channel for Yap.
- *
- * Sends rich Slack messages when:
- * - A new yap arrives (from unknown or known contact)
- * - A landing proposal needs approval (confirm/decline buttons)
- * - A chirp needs context from the user (field-by-field prompts)
- * - A branch is confirmed or declined
- *
- * Uses Slack Incoming Webhooks for notifications and
- * Slack Interactivity (slash commands or HTTP callbacks) for responses.
- *
- * All secrets (webhook URL, signing secret) come from environment variables.
+ * Implements NotificationChannel interface.
  */
 
+import type { NotificationChannel } from "./channel.js";
+
 export interface SlackConfig {
-  /** Slack Incoming Webhook URL — for sending messages. From env, never hardcoded. */
   webhookUrl: string;
-  /** Optional: bot name shown in Slack */
   botName?: string;
-  /** Optional: callback URL for interactive buttons (your server that receives Slack actions) */
-  interactiveCallbackUrl?: string;
 }
 
 export interface SlackMessage {
@@ -42,7 +30,8 @@ type SlackAction = {
   action_id: string;
 };
 
-export class SlackNotifier {
+export class SlackNotifier implements NotificationChannel {
+  readonly name = "slack";
   private webhookUrl: string;
   private botName: string;
 

@@ -12,15 +12,30 @@ import {
   type Intent,
 } from "../../sdk/src/index.js";
 import { createTree, type TreeInstance } from "../../tree/src/index.js";
-import { SlackNotifier } from "../../notify/src/slack.js";
+import { NotificationService, SlackNotifier, DiscordNotifier, EmailNotifier } from "../../notify/src/index.js";
 import { EventBuffer } from "./event-buffer.js";
 import { McpConsentPrompter } from "./mcp-consent.js";
 import { randomBytes } from "node:crypto";
 import { hostname, userInfo } from "node:os";
 
-// Slack integration (optional — only if SLACK_WEBHOOK_URL is set)
-const slackWebhookUrl = process.env.SLACK_WEBHOOK_URL;
-const slack = slackWebhookUrl ? new SlackNotifier({ webhookUrl: slackWebhookUrl }) : null;
+// Unified notification service — channels configured via env or tools
+const notify = new NotificationService();
+
+// Auto-configure from env vars (zero setup if not set)
+if (process.env.SLACK_WEBHOOK_URL) {
+  notify.addChannel(new SlackNotifier({ webhookUrl: process.env.SLACK_WEBHOOK_URL }));
+}
+if (process.env.DISCORD_WEBHOOK_URL) {
+  notify.addChannel(new DiscordNotifier({ webhookUrl: process.env.DISCORD_WEBHOOK_URL }));
+}
+if (process.env.EMAIL_API_URL && process.env.EMAIL_API_KEY && process.env.EMAIL_TO) {
+  notify.addChannel(new EmailNotifier({
+    apiUrl: process.env.EMAIL_API_URL,
+    apiKey: process.env.EMAIL_API_KEY,
+    from: process.env.EMAIL_FROM ?? "yap@yapprotocol.dev",
+    to: process.env.EMAIL_TO,
+  }));
+}
 
 // --- Zero-config setup ---
 
@@ -519,6 +534,65 @@ server.tool(
   },
 );
 
+// Tool: notifications setup
+server.tool(
+  "yap_notifications",
+  `Set up notifications so you get alerted when yaps arrive — even when you're not in Claude.
+
+Supported channels:
+- **slack**: Provide a Slack webhook URL (get one from https://api.slack.com/apps → Incoming Webhooks)
+- **discord**: Provide a Discord webhook URL (Server Settings → Integrations → Webhooks)
+- **email**: Provide email API URL, API key, and recipient address
+
+You can add multiple channels — notifications go to all of them.`,
+  {
+    action: z.enum(["status", "add_slack", "add_discord", "add_email"]).describe("What to do"),
+    webhook_url: z.string().optional().describe("Webhook URL for Slack or Discord"),
+    email_api_url: z.string().optional().describe("Email API endpoint (for email channel)"),
+    email_api_key: z.string().optional().describe("Email API key"),
+    email_to: z.string().optional().describe("Recipient email address"),
+  },
+  async ({ action, webhook_url, email_api_url, email_api_key, email_to }) => {
+    switch (action) {
+      case "status":
+        return {
+          content: [{ type: "text", text: JSON.stringify({
+            channels: notify.channelNames,
+            count: notify.channelCount,
+            hint: notify.channelCount === 0
+              ? "No notification channels configured. Add Slack, Discord, or email to get notified when yaps arrive."
+              : `Notifications go to: ${notify.channelNames.join(", ")}`,
+          }, null, 2) }],
+        };
+
+      case "add_slack":
+        if (!webhook_url) return { content: [{ type: "text", text: "Provide webhook_url. Get one from: https://api.slack.com/apps → Incoming Webhooks" }], isError: true };
+        notify.addChannel(new SlackNotifier({ webhookUrl: webhook_url }));
+        return { content: [{ type: "text", text: "Slack notifications enabled! You'll get messages when yaps arrive." }] };
+
+      case "add_discord":
+        if (!webhook_url) return { content: [{ type: "text", text: "Provide webhook_url. Get one from: Server Settings → Integrations → Webhooks" }], isError: true };
+        notify.addChannel(new DiscordNotifier({ webhookUrl: webhook_url }));
+        return { content: [{ type: "text", text: "Discord notifications enabled!" }] };
+
+      case "add_email":
+        if (!email_api_url || !email_api_key || !email_to) {
+          return { content: [{ type: "text", text: "Provide email_api_url, email_api_key, and email_to." }], isError: true };
+        }
+        notify.addChannel(new EmailNotifier({
+          apiUrl: email_api_url,
+          apiKey: email_api_key,
+          from: "yap@yapprotocol.dev",
+          to: email_to,
+        }));
+        return { content: [{ type: "text", text: `Email notifications enabled! Sending to ${email_to}` }] };
+
+      default:
+        return { content: [{ type: "text", text: "Unknown action." }], isError: true };
+    }
+  },
+);
+
 // Tool: manage_tree
 server.tool(
   "yap_status",
@@ -589,7 +663,7 @@ async function main() {
     if (!pendingApprovals.has(from)) {
       pendingApprovals.set(from, { threadId, intent: intentSummary, from });
       // Notify Slack
-      slack?.notifyContactRequest(from, intentSummary);
+      notify.dispatch({ type: "contact_request", from, intentSummary });
       // Notify Claude about the pending request
       buffer.push("notifications", "context_received", {
         notification: true,
@@ -630,7 +704,7 @@ async function main() {
     });
     respondFns.set(threadId, respond);
     // Slack: notify about chirp
-    slack?.notifyChirp("an agent", threadId, needs.map((n) => ({ field: n.field, reason: n.reason, priority: n.priority })));
+    notify.dispatch({ type: "chirp", from: "an agent", threadId, fields: needs.map((n) => ({ field: n.field, reason: n.reason, priority: n.priority })) });
     buffer.push("notifications", "context_received", {
       notification: true,
       type: "chirp_received",
@@ -645,7 +719,7 @@ async function main() {
     // Slack: send proposal with confirm/decline buttons
     const branch = agent.getBranch(threadId);
     const from = branch?.packets[0]?.from ?? "someone";
-    slack?.notifyLandingProposal(from, threadId, proposal.summary, proposal.details);
+    notify.dispatch({ type: "landing_proposal", from, threadId, summary: proposal.summary, details: proposal.details });
     buffer.push("notifications", "context_received", {
       notification: true,
       type: "landing_proposed",
@@ -659,7 +733,7 @@ async function main() {
     const branch = agent.getBranch(threadId);
     const from = branch?.packets[0]?.from ?? "someone";
     const summary = branch?.packets.find((p) => p.proposal)?.proposal?.summary ?? "Agreement reached";
-    slack?.notifyCompleted(threadId, summary, from);
+    notify.dispatch({ type: "completed", threadId, summary, withAgent: from });
     buffer.push("notifications", "context_received", {
       notification: true,
       type: "confirmed",
@@ -672,7 +746,7 @@ async function main() {
     buffer.push(threadId, "declined", { reason });
     const branch = agent.getBranch(threadId);
     const from = branch?.packets[0]?.from ?? "someone";
-    slack?.notifyDeclined(threadId, reason, from);
+    notify.dispatch({ type: "declined", threadId, reason, withAgent: from });
     buffer.push("notifications", "context_received", {
       notification: true,
       type: "declined",
