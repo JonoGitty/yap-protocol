@@ -55,6 +55,19 @@ export {
 export { Keystore } from "./keystore.js";
 export { ContactList } from "./contacts.js";
 export {
+  sanitiseString,
+  sanitiseContext,
+  sanitiseNeeds,
+  ReplayDetector,
+  RateLimiter,
+  validateTimestamp,
+  validateUrl,
+  scanContextUrls,
+  validateSchemaFields,
+  type SanitisationResult,
+} from "./security.js";
+export { type ClientSecurityConfig } from "./client.js";
+export {
   discoverServices,
   formatServiceSuggestions,
   type ServiceSuggestion,

@@ -56,16 +56,19 @@ export class ContactList {
     if (contact) {
       contact.last_seen = new Date().toISOString();
       contact.last_thread_id = threadId;
-
-      // Auto-escalate trust
-      const age = Date.now() - new Date(contact.first_seen).getTime();
-      const days = age / (1000 * 60 * 60 * 24);
-      if (days > 30) contact.trust_level = "trusted";
-      else if (days > 7) contact.trust_level = "established";
-      else if (days > 1) contact.trust_level = "developing";
-
+      // Trust is NOT auto-escalated — must be explicitly set by the user
+      // via setTrust() to prevent passive trust escalation attacks.
       this.dirty = true;
     }
+  }
+
+  /** Explicitly set trust level for a contact. Requires user action. */
+  setTrust(handle: string, level: "new" | "developing" | "established" | "trusted"): boolean {
+    const contact = this.contacts.get(handle);
+    if (!contact) return false;
+    contact.trust_level = level;
+    this.dirty = true;
+    return true;
   }
 
   get(handle: string): Contact | undefined {

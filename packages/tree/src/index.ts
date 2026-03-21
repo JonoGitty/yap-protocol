@@ -6,17 +6,47 @@ interface QueuedPacket {
   timestamp: string;
 }
 
+export interface TreeConfig {
+  /** Maximum packets queued per offline agent. Default: 100. */
+  maxQueuePerAgent?: number;
+  /** Maximum age of queued packets in ms. Default: 24 hours. */
+  queueTtlMs?: number;
+  /** Maximum packets per agent per minute. Default: 60. */
+  rateLimitPerMinute?: number;
+}
+
 export interface TreeInstance {
   wss: WebSocketServer;
   port: number;
   close: () => Promise<void>;
 }
 
-export function createTree(port: number): TreeInstance {
+const DEFAULT_CONFIG: Required<TreeConfig> = {
+  maxQueuePerAgent: 100,
+  queueTtlMs: 24 * 60 * 60 * 1000,
+  rateLimitPerMinute: 60,
+};
+
+export function createTree(port: number, userConfig?: TreeConfig): TreeInstance {
+  const config = { ...DEFAULT_CONFIG, ...userConfig };
   const agents = new Map<string, WebSocket>();
   const offlineQueue = new Map<string, QueuedPacket[]>();
+  const rateCounts = new Map<string, { count: number; windowStart: number }>();
 
   const wss = new WebSocketServer({ port });
+
+  // Periodic queue cleanup — expire old packets
+  const cleanupInterval = setInterval(() => {
+    const cutoff = Date.now() - config.queueTtlMs;
+    for (const [handle, queue] of offlineQueue) {
+      const filtered = queue.filter((p) => new Date(p.timestamp).getTime() > cutoff);
+      if (filtered.length === 0) {
+        offlineQueue.delete(handle);
+      } else {
+        offlineQueue.set(handle, filtered);
+      }
+    }
+  }, 60 * 1000); // Every minute
 
   wss.on("connection", (ws, req) => {
     const url = new URL(req.url ?? "", `http://localhost:${port}`);
@@ -29,14 +59,31 @@ export function createTree(port: number): TreeInstance {
     }
 
     const agentHandle = `@${handle}`;
+
+    // Check if handle is already connected (prevent spoofing)
+    const existing = agents.get(agentHandle);
+    if (existing && existing.readyState === WebSocket.OPEN) {
+      console.log(`⚠️ ${agentHandle} already connected — rejecting duplicate`);
+      ws.send(JSON.stringify({
+        protocol: "yap/0.2",
+        type: "error",
+        error_code: "HANDLE_IN_USE",
+        message: `Handle ${agentHandle} is already connected from another session`,
+      }));
+      ws.close(4001, "Handle already in use");
+      return;
+    }
+
     agents.set(agentHandle, ws);
     console.log(`✅ ${agentHandle} connected`);
 
-    // Flush any queued packets
+    // Flush queued packets (with TTL filter)
     const queued = offlineQueue.get(agentHandle);
     if (queued && queued.length > 0) {
-      console.log(`📬 Flushing ${queued.length} queued yap(s) to ${agentHandle}`);
-      for (const packet of queued) {
+      const cutoff = Date.now() - config.queueTtlMs;
+      const valid = queued.filter((p) => new Date(p.timestamp).getTime() > cutoff);
+      console.log(`📬 Flushing ${valid.length} queued yap(s) to ${agentHandle} (${queued.length - valid.length} expired)`);
+      for (const packet of valid) {
         ws.send(packet.data);
       }
       offlineQueue.delete(agentHandle);
@@ -45,13 +92,31 @@ export function createTree(port: number): TreeInstance {
     ws.on("message", (data) => {
       const raw = data.toString();
 
+      // Rate limiting
+      const now = Date.now();
+      const rateEntry = rateCounts.get(agentHandle);
+      if (rateEntry && now - rateEntry.windowStart < 60000) {
+        rateEntry.count++;
+        if (rateEntry.count > config.rateLimitPerMinute) {
+          ws.send(JSON.stringify({
+            protocol: "yap/0.2",
+            type: "error",
+            error_code: "RATE_LIMITED",
+            message: `Rate limit exceeded (${config.rateLimitPerMinute}/min). Slow down.`,
+          }));
+          return;
+        }
+      } else {
+        rateCounts.set(agentHandle, { count: 1, windowStart: now });
+      }
+
       let packet: { to?: string; type?: string; packet_id?: string };
       try {
         packet = JSON.parse(raw);
       } catch {
         console.error(`❌ Malformed JSON from ${agentHandle}`);
         ws.send(JSON.stringify({
-          protocol: "yap/0.1",
+          protocol: "yap/0.2",
           type: "error",
           error_code: "MALFORMED_PACKET",
           message: "Could not parse packet as JSON",
@@ -63,7 +128,7 @@ export function createTree(port: number): TreeInstance {
       if (!target) {
         console.error(`❌ Packet from ${agentHandle} missing 'to' field`);
         ws.send(JSON.stringify({
-          protocol: "yap/0.1",
+          protocol: "yap/0.2",
           type: "error",
           error_code: "MISSING_RECIPIENT",
           message: "Packet missing 'to' field",
@@ -77,10 +142,16 @@ export function createTree(port: number): TreeInstance {
       if (targetWs && targetWs.readyState === WebSocket.OPEN) {
         targetWs.send(raw);
       } else {
-        console.log(`💤 ${target} is offline, queuing packet`);
+        // Queue with size limit
         const queue = offlineQueue.get(target) ?? [];
+        if (queue.length >= config.maxQueuePerAgent) {
+          // Drop oldest
+          queue.shift();
+          console.log(`⚠️ Queue full for ${target}, dropped oldest packet`);
+        }
         queue.push({ data: raw, timestamp: new Date().toISOString() });
         offlineQueue.set(target, queue);
+        console.log(`💤 ${target} is offline, queued (${queue.length}/${config.maxQueuePerAgent})`);
       }
     });
 
@@ -102,6 +173,7 @@ export function createTree(port: number): TreeInstance {
     wss,
     port,
     close: () => new Promise<void>((resolve) => {
+      clearInterval(cleanupInterval);
       for (const client of wss.clients) {
         client.close();
       }
@@ -116,4 +188,7 @@ if (isMainModule) {
   const port = Number(process.env.YAP_PORT ?? 8789);
   const tree = createTree(port);
   console.log(`🌳 Tree listening on ws://localhost:${tree.port}`);
+  console.log(`⚠️  WARNING: This tree is for development/testing only.`);
+  console.log(`⚠️  Do NOT expose to the internet without authentication and TLS.`);
+  console.log(`⚠️  Only connect agents you trust. You are responsible for your tree.`);
 }

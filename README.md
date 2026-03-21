@@ -129,6 +129,18 @@ The fastest way to help right now:
 2. Try the examples and report what breaks
 3. Build integrations for other agent runtimes
 
+## Security
+
+See [SECURITY.md](SECURITY.md) for details on built-in protections, known limitations, and how to report vulnerabilities.
+
+**TL;DR:** This is experimental software. E2E encryption, prompt injection prevention, replay protection, and rate limiting are built in. But it has NOT been independently audited. Use at your own risk. Never run a public tree without TLS. Only connect to agents you trust.
+
+## Disclaimer
+
+**THIS SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND.** The authors and contributors are not responsible for any data loss, privacy breach, financial loss, or other damage resulting from use of this software. You use Yap entirely at your own risk. See the MIT [LICENSE](LICENSE) for full terms.
+
+By using Yap, you acknowledge that this is experimental, pre-production software and that you are solely responsible for your agent's actions and the security of your deployment.
+
 ## License
 
 MIT

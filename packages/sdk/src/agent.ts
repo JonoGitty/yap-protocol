@@ -573,10 +573,9 @@ export class YapAgent {
       }
     }
 
-    // Silently decline never_share fields
-    for (const need of declined) {
-      unavailable.push({ field: need.field, status: "declined", hint: null });
-    }
+    // Silently drop never_share fields — don't even list them as declined
+    // to prevent inference attacks about what fields the user is hiding.
+    // Only user-declined ask_first fields appear in context_unavailable.
 
     // Prompt user for ask_first fields
     if (needs_consent.length > 0) {
