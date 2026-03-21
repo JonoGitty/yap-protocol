@@ -7,6 +7,8 @@ dist/
 .env
 .env.*
 .claude/
+.vscode/
+.mcp.json
 original v1/
 
 # Yap data — NEVER commit

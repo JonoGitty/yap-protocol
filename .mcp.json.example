@@ -2,9 +2,9 @@
   "mcpServers": {
     "yap": {
       "command": "npx",
-      "args": ["tsx", "C:/AI/yap-protocol/packages/claude-mcp/src/index.ts"],
+      "args": ["tsx", "packages/claude-mcp/src/index.ts"],
       "env": {
-        "YAP_HANDLE": "jono",
+        "YAP_HANDLE": "your-handle-here",
         "YAP_TREE_URL": "wss://tree.yapprotocol.dev"
       }
     }
