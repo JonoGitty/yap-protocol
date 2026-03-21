@@ -5,7 +5,7 @@
       "args": ["tsx", "C:/AI/yap-protocol/packages/claude-mcp/src/index.ts"],
       "env": {
         "YAP_HANDLE": "jono",
-        "YAP_TREE_URL": "wss://yap-tree.fly.dev"
+        "YAP_TREE_URL": "wss://tree.yapprotocol.dev"
       }
     }
   }
