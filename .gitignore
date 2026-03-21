@@ -1,17 +1,29 @@
+# Dependencies
 node_modules/
+
+# Build output
 dist/
-*.js
-*.d.ts
 *.js.map
-!jest.config.js
+
+# Environment & secrets
 .env
 .env.*
+
+# Editor / IDE
 .claude/
 .vscode/
-.mcp.json
-original v1/
+.idea/
+*.swp
+*.swo
 
-# Yap data — NEVER commit
+# OS
+.DS_Store
+Thumbs.db
+
+# Project config (user-specific — see .mcp.json.example)
+.mcp.json
+
+# Yap runtime data — NEVER commit
 *.keys.json
 keystore.json
 flock.json
@@ -20,4 +32,10 @@ blocklist.json
 registrations.json
 audit-*.log
 nests/
-~/.yap/
+.yap/
+
+# npm
+*.tgz
+
+# Test coverage
+coverage/
