@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer, type ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import {
@@ -9,6 +9,7 @@ import {
   type Proposal,
   type ComfortZone,
   type ConsentResult,
+  type Intent,
 } from "../../sdk/src/index.js";
 import { EventBuffer } from "./event-buffer.js";
 import { McpConsentPrompter } from "./mcp-consent.js";
@@ -39,6 +40,7 @@ const agent = new YapAgent({
   treeUrl,
   comfortZone,
   prompter: consentPrompter,
+  userData: {},
 });
 
 // Stashed callbacks for async decisions
@@ -82,36 +84,145 @@ agent.onError((err) => {
   });
 });
 
+agent.onSchemaProposal((threadId, extension, reason, from) => {
+  buffer.push(threadId, "context_received", {
+    type: "schema_proposal",
+    from,
+    extension,
+    reason,
+  });
+});
+
+agent.onSchemaConfirmed((threadId, schemaName, from) => {
+  buffer.push(threadId, "context_received", {
+    type: "schema_confirmed",
+    from,
+    schema_name: schemaName,
+  });
+});
+
 // --- MCP Server ---
 
 const server = new McpServer({
   name: "yap",
-  version: "0.1.0",
+  version: "0.2.0",
 });
 
-// Tool: send_yap
+// --- MCP Prompts (teach Claude how to use Yap) ---
+
+server.prompt(
+  "yap-agent",
+  "System prompt that teaches Claude how to act as a Yap agent on behalf of the user",
+  {},
+  () => ({
+    messages: [{
+      role: "user",
+      content: {
+        type: "text",
+        text: `You have access to the Yap protocol — an agent-to-agent coordination system. You can talk to other users' AI agents on behalf of your user.
+
+## How it works
+- You send "yaps" (structured context packets) to other agents via a relay server
+- Other agents receive your yaps, process them, and respond
+- You negotiate back and forth until you reach agreement
+- The user only needs to approve the final result (one tap)
+
+## Your workflow
+1. When the user wants to coordinate something with someone, use send_yap to start a branch
+2. Poll check_branch periodically to see responses from the other agent
+3. If the other agent sends a chirp (context request), decide what to share using respond_to_chirp
+4. When you have enough context from both sides, propose a landing (agreement)
+5. If you receive a landing proposal, present it clearly to the user and confirm/decline
+
+## Key principles
+- Always ask the user before sharing sensitive info (ask_first fields trigger consent)
+- Present proposals clearly — the user should understand what's being agreed
+- Keep negotiating until both sides have what they need
+- If something stalls, tell the user
+
+## Your handle: ${handle}
+## Connected to: ${treeUrl}
+## Comfort zone: always_share=${comfortZone.always_share.join(",")}, ask_first=${comfortZone.ask_first.join(",")}, never_share=${comfortZone.never_share.join(",")}`,
+      },
+    }],
+  }),
+);
+
+server.prompt(
+  "coordinate",
+  "Start coordinating something with another person's agent",
+  {
+    who: z.string().describe("The handle of the person to coordinate with (e.g. @bob)"),
+    what: z.string().describe("What you want to coordinate (e.g. 'dinner on Friday')"),
+  },
+  ({ who, what }) => ({
+    messages: [{
+      role: "user",
+      content: {
+        type: "text",
+        text: `I want to coordinate with ${who}: ${what}
+
+Use the Yap tools to make this happen. Start by sending a yap with the right context and needs, then handle the negotiation. Only ask me when you need my input or approval.`,
+      },
+    }],
+  }),
+);
+
+// --- MCP Resources (expose branch state) ---
+
+server.resource(
+  "branches",
+  "yap://branches",
+  { description: "All active Yap negotiation threads" },
+  async () => {
+    const branches = agent.listBranches();
+    const data = branches.map((b) => ({
+      thread_id: b.thread_id,
+      state: b.state,
+      created_at: b.created_at,
+      updated_at: b.updated_at,
+      pending_events: buffer.pendingCount(b.thread_id),
+    }));
+    return {
+      contents: [{
+        uri: "yap://branches",
+        mimeType: "application/json",
+        text: JSON.stringify(data, null, 2),
+      }],
+    };
+  },
+);
+
+// --- Tools ---
+
 server.tool(
   "send_yap",
-  "Start a new Yap branch (negotiation thread) with another agent. Returns the thread ID for tracking.",
+  `Send a yap to another agent to start or continue a negotiation. Use this when the user wants to coordinate, share, request, or negotiate anything with someone.
+
+Examples:
+- Schedule dinner: category "scheduling", context with dates/preferences, needs for their availability
+- Send a briefing: category "briefing", context with the summary/report data, no needs
+- Send an invoice: category "invoicing", context with line items/totals, needs for approval
+- Request feedback: category "review", context with the document, needs for their comments`,
   {
     to: z.string().describe("Target agent handle (e.g. '@bob')"),
     intent: z.object({
-      category: z.string().describe("Intent category (e.g. 'scheduling', 'sharing', 'coordinating')"),
-      summary: z.string().describe("Brief description of what this is about"),
+      category: z.string().describe("What this is about: scheduling, briefing, invoicing, review, questionnaire, report, coordinating, sharing"),
+      summary: z.string().describe("One-line description"),
       urgency: z.enum(["low", "medium", "high"]),
     }),
-    context: z.record(z.string(), z.unknown()).describe("Context data to share (key-value pairs)"),
+    context: z.record(z.string(), z.unknown()).describe("The context data to share — structure depends on the category"),
     needs: z.array(z.object({
-      field: z.string().describe("Field name you need from the other agent"),
-      reason: z.string().describe("Why you need this field"),
+      field: z.string().describe("What field you need from them"),
+      reason: z.string().describe("Why — this is shown to the other agent's user"),
       priority: z.enum(["required", "helpful", "nice_to_have"]),
-    })).describe("What context you need from the other agent"),
+    })).describe("What you need from the other agent. Empty array for one-shot deliveries like briefings."),
   },
   async ({ to, intent, context, needs }) => {
     try {
       const threadId = await agent.startBranch(to, intent, context, needs as Need[]);
       return {
-        content: [{ type: "text", text: JSON.stringify({ thread_id: threadId, status: "initiated" }, null, 2) }],
+        content: [{ type: "text", text: JSON.stringify({ thread_id: threadId, status: "initiated", message: `Yap sent to ${to}. Use check_branch with this thread_id to poll for their response.` }, null, 2) }],
       };
     } catch (err) {
       return {
@@ -122,16 +233,16 @@ server.tool(
   },
 );
 
-// Tool: check_branch
 server.tool(
   "check_branch",
-  "Check the status of a Yap branch. Returns pending events (new context, proposals, confirmations) and thread state. Call this to poll for updates.",
+  `Poll for updates on a negotiation thread. Call this after sending a yap to see if the other agent has responded. Returns new events like: context_received (they shared data), chirp_received (they're asking for info), landing_proposed (they proposed an agreement), confirmed, declined, stalled.
+
+Call without a thread_id to see all active branches at once.`,
   {
-    thread_id: z.string().optional().describe("Thread ID to check. If omitted, returns summary of all branches."),
+    thread_id: z.string().optional().describe("Thread ID to check. Omit to see all branches."),
   },
   async ({ thread_id }) => {
     if (!thread_id) {
-      // Summary of all branches
       const branches = agent.listBranches();
       const summary = branches.map((b) => ({
         thread_id: b.thread_id,
@@ -140,7 +251,7 @@ server.tool(
         pending_events: buffer.pendingCount(b.thread_id),
       }));
       return {
-        content: [{ type: "text", text: JSON.stringify({ branches: summary }, null, 2) }],
+        content: [{ type: "text", text: JSON.stringify({ branches: summary, hint: summary.length === 0 ? "No active branches. Use send_yap to start one." : `${summary.length} branch(es). Check ones with pending_events > 0.` }, null, 2) }],
       };
     }
 
@@ -158,21 +269,25 @@ server.tool(
             timestamp: e.timestamp,
             data: e.data,
           })),
+          hint: events.length === 0
+            ? "No new events yet — the other agent hasn't responded. Try again in a moment."
+            : `${events.length} new event(s). Process them and decide next steps.`,
         }, null, 2),
       }],
     };
   },
 );
 
-// Tool: respond_to_chirp
 server.tool(
   "respond_to_chirp",
-  "Respond to a context request or consent prompt. Provide values for requested fields, or decline them.",
+  `Respond to a context request from another agent. When check_branch shows a chirp_received or consent_pending event, use this to share or decline the requested fields.
+
+Always ask the user before sharing sensitive information. Present what's being asked and why.`,
   {
-    thread_id: z.string().describe("Thread ID of the chirp/consent to respond to"),
+    thread_id: z.string().describe("Thread ID of the request"),
     responses: z.array(z.object({
       field: z.string(),
-      approved: z.boolean().describe("Whether to share this field"),
+      approved: z.boolean().describe("true to share, false to decline"),
       value: z.unknown().optional().describe("The value to share (required if approved)"),
     })),
   },
@@ -183,19 +298,17 @@ server.tool(
       value: r.value,
     }));
 
-    // Try consent resolution first (from comfort zone ask_first flow)
     if (consentPrompter.resolveConsent(thread_id, consentResults)) {
       const shared = responses.filter((r) => r.approved).map((r) => r.field);
       const declined = responses.filter((r) => !r.approved).map((r) => r.field);
       return {
         content: [{
           type: "text",
-          text: JSON.stringify({ status: "consent_resolved", fields_shared: shared, fields_declined: declined }, null, 2),
+          text: JSON.stringify({ status: "sent", fields_shared: shared, fields_declined: declined }, null, 2),
         }],
       };
     }
 
-    // Try direct chirp response (from onChirp handler)
     const respond = respondFns.get(thread_id);
     if (respond) {
       const context: Record<string, unknown> = {};
@@ -215,16 +328,41 @@ server.tool(
     }
 
     return {
-      content: [{ type: "text", text: `No pending chirp or consent request for thread ${thread_id}` }],
+      content: [{ type: "text", text: `No pending request for thread ${thread_id}. Use check_branch to see current state.` }],
       isError: true,
     };
   },
 );
 
-// Tool: confirm_landing
+server.tool(
+  "propose_landing",
+  `Propose an agreement to the other agent. Use this when you have enough context from both sides to make a concrete proposal. The other agent's user will see this and confirm/decline.
+
+Make proposals specific and actionable — include venue, time, cost, or whatever details are relevant.`,
+  {
+    thread_id: z.string().describe("Thread ID of the negotiation"),
+    to: z.string().describe("Target agent handle"),
+    proposal: z.object({
+      summary: z.string().describe("One-line summary of the agreement (e.g. 'Dinner at The Botanist, Friday 19:00')"),
+      details: z.record(z.string(), z.unknown()).describe("Structured details (venue, date, time, cost, etc.)"),
+      alternatives: z.array(z.object({
+        summary: z.string(),
+        reason: z.string(),
+      })).optional().describe("Alternative options if this doesn't work"),
+      reasoning: z.string().optional().describe("Why you chose this option"),
+    }),
+  },
+  async ({ thread_id, to, proposal }) => {
+    agent.proposeLanding(thread_id, to, proposal as Proposal);
+    return {
+      content: [{ type: "text", text: JSON.stringify({ status: "proposed", thread_id, summary: proposal.summary, message: "Landing proposed. Use check_branch to see if they confirm or decline." }, null, 2) }],
+    };
+  },
+);
+
 server.tool(
   "confirm_landing",
-  "Accept a proposed landing (agreement). Call this after reviewing a landing_proposed event.",
+  "Accept a proposed agreement. Call this after presenting the proposal to the user and getting their approval.",
   {
     thread_id: z.string().describe("Thread ID of the landing to confirm"),
   },
@@ -232,11 +370,10 @@ server.tool(
     const decide = decideFns.get(thread_id);
     if (!decide) {
       return {
-        content: [{ type: "text", text: `No pending landing proposal for thread ${thread_id}` }],
+        content: [{ type: "text", text: `No pending proposal for thread ${thread_id}` }],
         isError: true,
       };
     }
-
     decide("confirm");
     decideFns.delete(thread_id);
     return {
@@ -245,23 +382,21 @@ server.tool(
   },
 );
 
-// Tool: decline_landing
 server.tool(
   "decline_landing",
-  "Reject a proposed landing. Optionally provide a reason.",
+  "Reject a proposed agreement. Always include a reason so the other agent can adjust.",
   {
     thread_id: z.string().describe("Thread ID of the landing to decline"),
-    reason: z.string().optional().describe("Reason for declining (e.g. 'scheduling_conflict', 'budget')"),
+    reason: z.string().optional().describe("Why — e.g. 'scheduling_conflict', 'over_budget', 'wrong_venue'"),
   },
   async ({ thread_id, reason }) => {
     const decide = decideFns.get(thread_id);
     if (!decide) {
       return {
-        content: [{ type: "text", text: `No pending landing proposal for thread ${thread_id}` }],
+        content: [{ type: "text", text: `No pending proposal for thread ${thread_id}` }],
         isError: true,
       };
     }
-
     decide("decline", reason);
     decideFns.delete(thread_id);
     return {
@@ -270,10 +405,9 @@ server.tool(
   },
 );
 
-// Tool: list_branches
 server.tool(
   "list_branches",
-  "List all active Yap branches (negotiation threads) with their current state and pending event counts.",
+  "Show all active Yap negotiation threads. Quick way to see what's going on.",
   {},
   async () => {
     const branches = agent.listBranches();
@@ -291,18 +425,19 @@ server.tool(
     });
 
     return {
-      content: [{ type: "text", text: JSON.stringify({ branches: result }, null, 2) }],
+      content: [{ type: "text", text: JSON.stringify({ branches: result, total: result.length }, null, 2) }],
     };
   },
 );
 
-// Tool: set_comfort_zone
 server.tool(
   "set_comfort_zone",
-  "Configure which fields are automatically shared, require consent, or are never shared with other agents.",
+  `Configure privacy preferences — which types of information are automatically shared, need approval, or are never shared.
+
+Common fields: timezone, general_availability, dietary, budget_range, location_preference, health_info, financial_details`,
   {
-    always_share: z.array(z.string()).optional().describe("Fields to share automatically (e.g. timezone, general_availability)"),
-    ask_first: z.array(z.string()).optional().describe("Fields that require your approval before sharing"),
+    always_share: z.array(z.string()).optional().describe("Fields to share automatically"),
+    ask_first: z.array(z.string()).optional().describe("Fields that need user approval"),
     never_share: z.array(z.string()).optional().describe("Fields that are never shared"),
   },
   async ({ always_share, ask_first, never_share }) => {
@@ -316,6 +451,38 @@ server.tool(
     return {
       content: [{ type: "text", text: JSON.stringify({ status: "updated", comfort_zone: updated }, null, 2) }],
     };
+  },
+);
+
+server.tool(
+  "send_to_group",
+  "Start a multi-party negotiation — send a yap to multiple agents at once. You act as coordinator.",
+  {
+    participants: z.array(z.string()).describe("Agent handles to include (e.g. ['@bob', '@charlie'])"),
+    intent: z.object({
+      category: z.string(),
+      summary: z.string(),
+      urgency: z.enum(["low", "medium", "high"]),
+    }),
+    context: z.record(z.string(), z.unknown()),
+    needs: z.array(z.object({
+      field: z.string(),
+      reason: z.string(),
+      priority: z.enum(["required", "helpful", "nice_to_have"]),
+    })),
+  },
+  async ({ participants, intent, context, needs }) => {
+    try {
+      const threadId = await agent.startGroupBranch(participants, intent, context, needs as Need[]);
+      return {
+        content: [{ type: "text", text: JSON.stringify({ thread_id: threadId, status: "initiated", participants, message: `Group yap sent to ${participants.length} agents. Poll check_branch to see responses.` }, null, 2) }],
+      };
+    } catch (err) {
+      return {
+        content: [{ type: "text", text: `Error: ${(err as Error).message}` }],
+        isError: true,
+      };
+    }
   },
 );
 
