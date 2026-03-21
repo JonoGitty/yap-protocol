@@ -2,7 +2,7 @@ import WebSocket from "ws";
 import type { YapPacket } from "./types.js";
 import { validateYap } from "./yap.js";
 import { encryptPacket, decryptPacket, deriveSharedSecret } from "./crypto.js";
-import { ReplayDetector, validateTimestamp, sanitiseContext, sanitiseNeeds, RateLimiter } from "./security.js";
+import { ReplayDetector, validateTimestamp, sanitiseContext, sanitiseNeeds, RateLimiter, type Blocklist } from "./security.js";
 import type { Keystore } from "./keystore.js";
 
 export interface ClientSecurityConfig {
@@ -10,6 +10,10 @@ export interface ClientSecurityConfig {
   encryption?: boolean;
   /** Keystore for key management. */
   keystore?: Keystore;
+  /** Auth token for tree connection. */
+  authToken?: string;
+  /** Agent blocklist — packets from blocked agents are dropped. */
+  blocklist?: Blocklist;
   /** Enable replay detection. Default: true. */
   replayDetection?: boolean;
   /** Enable timestamp validation. Default: true. */
@@ -54,7 +58,10 @@ export class YapClient {
   connect(): Promise<void> {
     return new Promise((resolve, reject) => {
       this.intentionalClose = false;
-      const url = `${this.treeUrl}?handle=${encodeURIComponent(this.handle)}`;
+      let url = `${this.treeUrl}?handle=${encodeURIComponent(this.handle)}`;
+      if (this.security.authToken) {
+        url += `&token=${encodeURIComponent(this.security.authToken)}`;
+      }
       this.ws = new WebSocket(url);
 
       this.ws.on("open", () => {
@@ -84,16 +91,21 @@ export class YapClient {
             }
           }
 
-          // 2. Timestamp validation
+          // 2. Blocklist check
+          if (this.security.blocklist && yap.from && this.security.blocklist.has(yap.from)) {
+            return; // Silently drop packets from blocked agents
+          }
+
+          // 3. Timestamp validation — DROP packets with excessive drift
           if (this.security.timestampValidation && yap.timestamp) {
             const ts = validateTimestamp(yap.timestamp);
             if (!ts.valid) {
-              this.emitSecurityWarning(`Timestamp validation failed: ${ts.reason}`, yap);
-              // Don't drop — just warn. Clock skew is common.
+              this.emitSecurityWarning(`Timestamp rejected: ${ts.reason}`, yap);
+              return; // Drop — prevents replay with old timestamps
             }
           }
 
-          // 3. Rate limiting
+          // 4. Rate limiting
           if (this.security.rateLimiting && yap.from) {
             if (this.rateLimiter.isLimited(yap.from)) {
               this.emitSecurityWarning(`Rate limit exceeded for ${yap.from}`, yap);

@@ -62,6 +62,12 @@ export function sanitiseContext(context: Record<string, unknown>): {
 } {
   const warnings: string[] = [];
 
+  // Depth check
+  if (!validateDepth(context)) {
+    warnings.push("Context exceeds maximum nesting depth (10). Truncating.");
+    return { context: {}, warnings };
+  }
+
   function sanitiseValue(value: unknown, path: string): unknown {
     if (typeof value === "string") {
       const result = sanitiseString(value);
@@ -251,4 +257,63 @@ export function validateSchemaFields(fields: Record<string, unknown>): string[] 
 
   validate(fields, "schema");
   return warnings;
+}
+
+// --- Depth validation ---
+
+/** Validate that an object doesn't exceed max nesting depth. */
+export function validateDepth(obj: unknown, maxDepth: number = 10, currentDepth: number = 0): boolean {
+  if (currentDepth > maxDepth) return false;
+  if (typeof obj !== "object" || obj === null) return true;
+  if (Array.isArray(obj)) {
+    return obj.every((item) => validateDepth(item, maxDepth, currentDepth + 1));
+  }
+  return Object.values(obj).every((val) => validateDepth(val, maxDepth, currentDepth + 1));
+}
+
+// --- Agent blocklist ---
+
+import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { dirname } from "node:path";
+
+export class Blocklist {
+  private blocked = new Set<string>();
+  private dirty = false;
+
+  constructor(private storePath: string) {}
+
+  async load(): Promise<void> {
+    try {
+      const data = await readFile(this.storePath, "utf-8");
+      const list = JSON.parse(data) as string[];
+      for (const handle of list) this.blocked.add(handle);
+    } catch {
+      // No existing file
+    }
+  }
+
+  async save(): Promise<void> {
+    if (!this.dirty) return;
+    await mkdir(dirname(this.storePath), { recursive: true });
+    await writeFile(this.storePath, JSON.stringify([...this.blocked]), "utf-8");
+    this.dirty = false;
+  }
+
+  add(handle: string): void {
+    this.blocked.add(handle);
+    this.dirty = true;
+  }
+
+  remove(handle: string): void {
+    this.blocked.delete(handle);
+    this.dirty = true;
+  }
+
+  has(handle: string): boolean {
+    return this.blocked.has(handle);
+  }
+
+  list(): string[] {
+    return [...this.blocked];
+  }
 }

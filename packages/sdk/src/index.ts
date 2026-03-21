@@ -65,8 +65,11 @@ export {
   scanContextUrls,
   validateSchemaFields,
   type SanitisationResult,
+  Blocklist,
+  validateDepth,
 } from "./security.js";
 export { type ClientSecurityConfig } from "./client.js";
+export { AuditLog, type SecurityEvent, type SecurityEventType } from "./audit-log.js";
 export {
   discoverServices,
   formatServiceSuggestions,

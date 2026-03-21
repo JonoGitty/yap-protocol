@@ -11,7 +11,10 @@ import type {
 } from "./types.js";
 import { ContactList } from "./contacts.js";
 import { discoverServices, type ServiceSuggestion } from "./service-discovery.js";
-import { YapClient } from "./client.js";
+import { YapClient, type ClientSecurityConfig } from "./client.js";
+import { Keystore } from "./keystore.js";
+import { generateEncryptionKeyPair, generateSigningKeyPair } from "./crypto.js";
+import { Blocklist } from "./security.js";
 import { BranchManager } from "./branch.js";
 import type { ComfortZone } from "./comfort-zone.js";
 import { classifyNeeds } from "./comfort-zone.js";
@@ -22,6 +25,7 @@ import {
   createLanding,
   createConfirmation,
   createDecline,
+  createKeyExchange,
   generateId,
 } from "./yap.js";
 import { LOCAL_CAPABILITIES, negotiateVersion } from "./version.js";
@@ -44,6 +48,14 @@ export interface AgentConfig {
   serviceVisibility?: ServiceVisibilityPolicy;
   /** Path for storing contacts (e.g. "~/.yap/contacts.json") */
   contactsPath?: string;
+  /** Path for keystore — enables E2E encryption (e.g. "~/.yap/keys.json") */
+  keystorePath?: string;
+  /** Passphrase to encrypt keystore at rest */
+  keystorePassphrase?: string;
+  /** Auth token for tree connection */
+  authToken?: string;
+  /** Path for blocklist (e.g. "~/.yap/blocklist.json") */
+  blocklistPath?: string;
   timeouts?: {
     urgent_ms?: number;
     non_urgent_ms?: number;
@@ -69,6 +81,9 @@ export class YapAgent {
   private allServices: ConnectedService[];
   private servicePolicy: ServiceVisibilityPolicy;
   private contacts: ContactList | null = null;
+  private keystore: Keystore | null = null;
+  private blocklist: Blocklist | null = null;
+  private threadCoordinators = new Map<string, string>();
   private serviceDiscoveryHandler?: (threadId: string, suggestions: ServiceSuggestion[]) => void;
 
   // Event handlers
@@ -90,7 +105,27 @@ export class YapAgent {
   constructor(config: AgentConfig) {
     this.handle = config.handle.startsWith("@") ? config.handle : `@${config.handle}`;
     const rawHandle = this.handle.slice(1);
-    this.client = new YapClient(config.treeUrl, rawHandle);
+
+    // Security setup
+    if (config.keystorePath) {
+      this.keystore = new Keystore(config.keystorePath, config.keystorePassphrase);
+    }
+    if (config.blocklistPath) {
+      this.blocklist = new Blocklist(config.blocklistPath);
+    }
+
+    const securityConfig: ClientSecurityConfig = {
+      encryption: !!this.keystore,
+      keystore: this.keystore ?? undefined,
+      authToken: config.authToken,
+      blocklist: this.blocklist ?? undefined,
+      replayDetection: true,
+      timestampValidation: true,
+      sanitisation: true,
+      rateLimiting: true,
+    };
+
+    this.client = new YapClient(config.treeUrl, rawHandle, securityConfig);
     this.branches = new BranchManager();
     this.zone = config.comfortZone;
     this.prompter = config.prompter;
@@ -113,6 +148,14 @@ export class YapAgent {
 
   async connect(): Promise<void> {
     if (this.contacts) await this.contacts.load();
+    if (this.blocklist) await this.blocklist.load();
+    if (this.keystore) {
+      await this.keystore.load();
+      if (!this.keystore.isInitialized()) {
+        this.keystore.initialize(generateEncryptionKeyPair(), generateSigningKeyPair());
+        await this.keystore.save();
+      }
+    }
     await this.client.connect();
   }
 
@@ -170,6 +213,31 @@ export class YapAgent {
     this.serviceDiscoveryHandler = handler;
   }
 
+  // --- Security methods ---
+
+  blockAgent(handle: string): void {
+    this.blocklist?.add(handle);
+    this.blocklist?.save().catch(() => {});
+  }
+
+  unblockAgent(handle: string): void {
+    this.blocklist?.remove(handle);
+    this.blocklist?.save().catch(() => {});
+  }
+
+  /** Remove all traces of an agent — contacts, keys, blocklist. */
+  async purgeAgent(handle: string): Promise<void> {
+    this.contacts?.remove(handle);
+    await this.contacts?.save();
+    if (this.keystore) {
+      this.keystore.removePeer(handle);
+      await this.keystore.save();
+    }
+    this.blocklist?.remove(handle);
+    await this.blocklist?.save();
+    this.remoteCapabilities.delete(handle);
+  }
+
   // --- Public accessors ---
 
   getHandle(): string {
@@ -201,6 +269,16 @@ export class YapAgent {
     needs: Need[],
   ): Promise<string> {
     const threadId = generateId("thr");
+
+    // Auto key exchange on first contact if encryption enabled
+    if (this.keystore && !this.keystore.hasPeerKeys(to)) {
+      const ownEnc = this.keystore.getOwnEncryptionKeys();
+      const ownSign = this.keystore.getOwnSigningKeys();
+      if (ownEnc && ownSign) {
+        const kex = createKeyExchange(this.handle, to, ownEnc.publicKey, ownSign.publicKey);
+        this.client.send(kex);
+      }
+    }
 
     const yap = createYap({
       thread_id: threadId,
@@ -443,6 +521,35 @@ export class YapAgent {
           yap.from,
         );
         break;
+      case "key_exchange":
+        if (this.keystore && yap.public_encryption_key && yap.public_signing_key) {
+          this.keystore.storePeerKeys(yap.from, yap.public_encryption_key, yap.public_signing_key);
+          await this.keystore.save();
+          // Respond with our own keys if they don't have ours yet
+          if (this.keystore.getOwnEncryptionKeys() && this.keystore.getOwnSigningKeys()) {
+            const ownEnc = this.keystore.getOwnEncryptionKeys()!;
+            const ownSign = this.keystore.getOwnSigningKeys()!;
+            const response = createKeyExchange(this.handle, yap.from, ownEnc.publicKey, ownSign.publicKey);
+            this.client.send(response);
+          }
+        }
+        break;
+      case "coordinator_transfer":
+        // Verify the sender is the current coordinator
+        const currentCoordinator = this.threadCoordinators.get(threadId);
+        if (currentCoordinator && yap.from !== currentCoordinator) {
+          // Drop spoofed coordinator transfer
+          this.errorHandler?.({
+            code: "MALFORMED",
+            thread_id: threadId,
+            message: `Coordinator transfer from non-coordinator ${yap.from} (expected ${currentCoordinator})`,
+          });
+          break;
+        }
+        if (yap.coordinator) {
+          this.threadCoordinators.set(threadId, yap.coordinator);
+        }
+        break;
       case "error":
         this.errorHandler?.({
           code: "MALFORMED",
@@ -454,6 +561,11 @@ export class YapAgent {
   }
 
   private async handleIncomingContext(yap: YapPacket): Promise<void> {
+    // Track coordinator for multi-party
+    if (yap.coordinator && !this.threadCoordinators.has(yap.thread_id)) {
+      this.threadCoordinators.set(yap.thread_id, yap.coordinator);
+    }
+
     // Check loop limit
     if (!this.checkLoopLimit(yap.thread_id)) return;
 

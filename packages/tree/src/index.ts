@@ -13,6 +13,10 @@ export interface TreeConfig {
   queueTtlMs?: number;
   /** Maximum packets per agent per minute. Default: 60. */
   rateLimitPerMinute?: number;
+  /** Maximum packet size in bytes. Default: 1MB. */
+  maxPacketBytes?: number;
+  /** Auth tokens: handle → token. If set, connections require valid token. */
+  authTokens?: Map<string, string>;
 }
 
 export interface TreeInstance {
@@ -21,10 +25,11 @@ export interface TreeInstance {
   close: () => Promise<void>;
 }
 
-const DEFAULT_CONFIG: Required<TreeConfig> = {
+const DEFAULT_CONFIG = {
   maxQueuePerAgent: 100,
   queueTtlMs: 24 * 60 * 60 * 1000,
   rateLimitPerMinute: 60,
+  maxPacketBytes: 1_048_576, // 1MB
 };
 
 export function createTree(port: number, userConfig?: TreeConfig): TreeInstance {
@@ -60,6 +65,17 @@ export function createTree(port: number, userConfig?: TreeConfig): TreeInstance 
 
     const agentHandle = `@${handle}`;
 
+    // Token authentication (if configured)
+    if (config.authTokens) {
+      const token = url.searchParams.get("token");
+      const expected = config.authTokens.get(agentHandle) ?? config.authTokens.get(handle);
+      if (!expected || expected !== token) {
+        console.log(`🔒 ${agentHandle} rejected: invalid or missing auth token`);
+        ws.close(4003, "Authentication failed");
+        return;
+      }
+    }
+
     // Check if handle is already connected (prevent spoofing)
     const existing = agents.get(agentHandle);
     if (existing && existing.readyState === WebSocket.OPEN) {
@@ -91,6 +107,17 @@ export function createTree(port: number, userConfig?: TreeConfig): TreeInstance 
 
     ws.on("message", (data) => {
       const raw = data.toString();
+
+      // Packet size limit
+      if (raw.length > config.maxPacketBytes) {
+        ws.send(JSON.stringify({
+          protocol: "yap/0.2",
+          type: "error",
+          error_code: "PACKET_TOO_LARGE",
+          message: `Packet exceeds ${config.maxPacketBytes} bytes (got ${raw.length})`,
+        }));
+        return;
+      }
 
       // Rate limiting
       const now = Date.now();
