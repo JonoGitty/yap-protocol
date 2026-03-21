@@ -143,7 +143,7 @@ async function handleRegister(req: IncomingMessage, res: ServerResponse): Promis
     res.end(JSON.stringify({
       handle: agentHandle,
       token,
-      tree_url: `wss://yap-tree.fly.dev`,
+      tree_url: `wss://tree.yapprotocol.dev`,
       message: "Save this token — it cannot be recovered.",
     }));
   } catch {
@@ -186,12 +186,12 @@ wss.on("connection", (ws, req) => {
 
   const agentHandle = `@${handle}`;
 
-  // Reject duplicate
+  // Kick old session if duplicate (newest wins, like WhatsApp/Telegram)
   const existing = agents.get(agentHandle);
   if (existing && existing.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({ protocol: "yap/0.2", type: "error", error_code: "HANDLE_IN_USE", message: `${agentHandle} already connected` }));
-    ws.close(4001, "Handle in use");
-    return;
+    console.log(`⚠️ ${agentHandle} reconnecting — closing old session`);
+    existing.send(JSON.stringify({ protocol: "yap/0.2", type: "error", error_code: "SESSION_REPLACED", message: "Connected from another session" }));
+    existing.close(4001, "Replaced by new session");
   }
 
   agents.set(agentHandle, ws);
