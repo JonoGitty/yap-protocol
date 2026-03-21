@@ -1,0 +1,15 @@
+{
+  "name": "@yap-protocol/openclaw-skill",
+  "version": "0.1.0",
+  "description": "OpenClaw skill for the Yap agent-to-agent context protocol",
+  "type": "module",
+  "main": "./src/index.ts",
+  "license": "MIT",
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.5.13",
+    "typescript": "^5.7.0"
+  }
+}

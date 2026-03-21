@@ -1,0 +1,19 @@
+{
+  "name": "@yap-protocol/claude-mcp",
+  "version": "0.1.0",
+  "description": "Claude MCP server for the Yap agent-to-agent context protocol",
+  "type": "module",
+  "main": "./src/index.ts",
+  "bin": {
+    "yap-mcp": "./src/index.ts"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.1",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.5.13",
+    "typescript": "^5.7.0"
+  }
+}

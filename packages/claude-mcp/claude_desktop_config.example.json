@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "yap": {
+      "command": "npx",
+      "args": ["@yap-protocol/claude-mcp"],
+      "env": {
+        "YAP_HANDLE": "your-handle",
+        "YAP_TREE_URL": "ws://localhost:8789",
+        "YAP_ALWAYS_SHARE": "timezone,general_availability",
+        "YAP_ASK_FIRST": "dietary,budget_range,location_preference",
+        "YAP_NEVER_SHARE": "health_info,financial_details"
+      }
+    }
+  }
+}

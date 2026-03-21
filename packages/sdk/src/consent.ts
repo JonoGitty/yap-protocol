@@ -12,6 +12,7 @@ export interface ConsentPrompter {
     fromAgent: string,
     needs: Need[],
     threadSummary: string,
+    threadId?: string,
   ): Promise<ConsentResult[]>;
 }
 

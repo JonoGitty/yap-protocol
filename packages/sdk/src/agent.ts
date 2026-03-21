@@ -86,6 +86,28 @@ export class YapAgent {
     this.client.disconnect();
   }
 
+  // --- Public accessors ---
+
+  getHandle(): string {
+    return this.handle;
+  }
+
+  getBranch(threadId: string) {
+    return this.branches.getBranch(threadId);
+  }
+
+  listBranches() {
+    return this.branches.listBranches();
+  }
+
+  getComfortZone(): ComfortZone {
+    return this.zone;
+  }
+
+  setComfortZone(zone: ComfortZone): void {
+    this.zone = zone;
+  }
+
   // --- Initiator: start a new branch ---
 
   async startBranch(
@@ -189,7 +211,7 @@ export class YapAgent {
         this.errorHandler?.({
           code: "MALFORMED",
           thread_id: threadId,
-          message: (yap as Record<string, unknown>).message as string ?? "Tree error",
+          message: (yap as unknown as Record<string, unknown>).message as string ?? "Tree error",
         });
         break;
     }
@@ -322,7 +344,7 @@ export class YapAgent {
 
     // Prompt user for ask_first fields
     if (needs_consent.length > 0) {
-      const results = await this.prompter.promptBatch(toAgent, needs_consent, threadSummary);
+      const results = await this.prompter.promptBatch(toAgent, needs_consent, threadSummary, threadId);
       for (const result of results) {
         if (result.approved && result.value !== undefined) {
           provided[result.field] = result.value;
