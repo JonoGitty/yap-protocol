@@ -1,45 +1,29 @@
-# Fly.io deployment config for Yap tree
-# Deploy with: fly deploy --config deploy/fly.toml --dockerfile deploy/Dockerfile
-
+# Fly.io config — single port for WebSocket + HTTP API
 app = "yap-tree"
 primary_region = "lhr"
 
 [build]
-  dockerfile = "deploy/Dockerfile"
+  dockerfile = "Dockerfile"
 
 [env]
   NODE_ENV = "production"
   YAP_PORT = "8789"
-  YAP_API_PORT = "8790"
   YAP_DATA_DIR = "/data"
 
 [mounts]
   source = "yap_data"
   destination = "/data"
 
-[[services]]
+[http_service]
   internal_port = 8789
-  protocol = "tcp"
-  auto_stop_machines = false
+  force_https = true
+  auto_stop_machines = "off"
   auto_start_machines = true
-
-  [[services.ports]]
-    port = 443
-    handlers = ["tls", "http"]
-
-  [[services.ports]]
-    port = 80
-    handlers = ["http"]
-
-  [services.concurrency]
-    type = "connections"
-    hard_limit = 2000
-    soft_limit = 1000
 
 [checks]
   [checks.health]
     type = "http"
-    port = 8790
-    path = "/info"
+    port = 8789
+    path = "/health"
     interval = "30s"
     timeout = "5s"

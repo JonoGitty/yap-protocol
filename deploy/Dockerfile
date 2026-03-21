@@ -24,9 +24,9 @@ RUN adduser -D -u 1001 yaptree
 RUN mkdir -p /data && chown yaptree:yaptree /data
 USER yaptree
 
-EXPOSE 8789 8790
+EXPOSE 8789
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
-  CMD wget -qO- http://localhost:8790/info || exit 1
+  CMD wget -qO- http://localhost:8789/health || exit 1
 
 CMD ["tsx", "packages/tree/src/server.ts"]
