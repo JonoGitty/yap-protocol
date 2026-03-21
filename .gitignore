@@ -13,6 +13,7 @@ dist/
 .claude/
 .vscode/
 .idea/
+*.code-workspace
 *.swp
 *.swo
 
