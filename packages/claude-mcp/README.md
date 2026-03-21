@@ -1,8 +1,10 @@
 # Yap MCP Server
 
-Use Yap directly from Claude Desktop or Claude Code. Claude becomes your agent — negotiating with other agents on your behalf.
+Use Yap directly from Claude. Zero config — it starts its own tree, picks your username, and just works.
 
-## Setup for Claude Desktop
+## Setup
+
+### Claude Desktop
 
 Add to your `claude_desktop_config.json`:
 
@@ -11,50 +13,49 @@ Add to your `claude_desktop_config.json`:
   "mcpServers": {
     "yap": {
       "command": "npx",
-      "args": ["tsx", "/path/to/yap-protocol/packages/claude-mcp/src/index.ts"],
-      "env": {
-        "YAP_HANDLE": "your-name",
-        "YAP_TREE_URL": "ws://localhost:8789"
-      }
+      "args": ["tsx", "/path/to/yap-protocol/packages/claude-mcp/src/index.ts"]
     }
   }
 }
 ```
 
-## Setup for Claude Code
+That's it. No tree URL, no tokens. It auto-starts an embedded tree and uses your system username as your handle.
 
-```bash
-claude mcp add yap -- npx tsx /path/to/yap-protocol/packages/claude-mcp/src/index.ts
-```
+### Claude Code
 
-Or add to your project's `.claude/settings.json`:
+Add `.mcp.json` to your project:
 
 ```json
 {
   "mcpServers": {
     "yap": {
       "command": "npx",
-      "args": ["tsx", "./packages/claude-mcp/src/index.ts"],
-      "env": {
-        "YAP_HANDLE": "your-name",
-        "YAP_TREE_URL": "ws://localhost:8789"
-      }
+      "args": ["tsx", "/path/to/yap-protocol/packages/claude-mcp/src/index.ts"]
     }
   }
 }
 ```
 
-## Environment Variables
+### Optional Config
+
+Set environment variables only if you need to override defaults:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `YAP_HANDLE` | `claude-user` | Your agent handle |
-| `YAP_TREE_URL` | `ws://localhost:8789` | Tree relay server URL |
-| `YAP_ALWAYS_SHARE` | `timezone,general_availability` | Comma-separated fields to auto-share |
+| `YAP_HANDLE` | System username | Your agent handle |
+| `YAP_TREE_URL` | Auto-start embedded tree | External tree URL (only if connecting to a shared tree) |
+| `YAP_ALWAYS_SHARE` | `timezone,general_availability` | Auto-shared fields |
 | `YAP_ASK_FIRST` | `dietary,budget_range,location_preference` | Fields needing approval |
 | `YAP_NEVER_SHARE` | `health_info,financial_details` | Fields never shared |
 
-## Available Tools
+## How It Works
+
+1. MCP server starts → auto-starts an embedded tree (or connects to external one)
+2. Connects as your agent handle
+3. Claude gets 10 tools for the full Yap protocol
+4. Just talk naturally: "Coordinate dinner with @bob for Friday"
+
+## Tools
 
 | Tool | What it does |
 |------|-------------|
@@ -66,28 +67,22 @@ Or add to your project's `.claude/settings.json`:
 | `decline_landing` | Reject a proposal |
 | `list_branches` | See all active negotiations |
 | `set_comfort_zone` | Configure privacy preferences |
-| `send_to_group` | Start a multi-party negotiation |
+| `send_to_group` | Multi-party negotiation |
+| `yap_status` | Check connection status |
 
-## MCP Prompts
+## Connecting Multiple Agents
 
-| Prompt | Description |
-|--------|-------------|
-| `yap-agent` | Teaches Claude how to act as your Yap agent |
-| `coordinate` | Quick start: "coordinate with @bob about dinner friday" |
+For agents to talk to each other, they need to be on the same tree:
 
-## Usage
+**Local (same machine):** Both Claude sessions point to the same tree. Set `YAP_TREE_URL=ws://localhost:18790` on the second session (use the port from the first session's embedded tree).
 
-Once set up, just talk to Claude naturally:
-
-> "Can you coordinate dinner with @bob for Friday? I'm vegetarian and free 6-9pm."
-
-Claude will use the Yap tools to negotiate with Bob's agent, handle consent prompts, and present you with a proposal to confirm.
-
-## Running the Tree
-
-You need a tree server running for agents to connect:
-
+**Remote (different machines):** Run a shared tree server and point both to it:
 ```bash
-cd yap-protocol
+# On a server
 npx tsx packages/tree/src/index.ts
+
+# Both clients
+YAP_TREE_URL=ws://your-server:8789
 ```
+
+**Future:** We'll host a public tree at `tree.yap.dev` so agents find each other automatically.

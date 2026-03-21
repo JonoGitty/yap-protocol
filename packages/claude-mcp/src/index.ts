@@ -11,13 +11,23 @@ import {
   type ConsentResult,
   type Intent,
 } from "../../sdk/src/index.js";
+import { createTree, type TreeInstance } from "../../tree/src/index.js";
 import { EventBuffer } from "./event-buffer.js";
 import { McpConsentPrompter } from "./mcp-consent.js";
+import { randomBytes } from "node:crypto";
+import { hostname, userInfo } from "node:os";
 
-// --- Config from environment ---
+// --- Zero-config setup ---
 
-const handle = process.env.YAP_HANDLE ?? "claude-user";
-const treeUrl = process.env.YAP_TREE_URL ?? "ws://localhost:8789";
+// Auto-detect handle from system username or env
+const handle = process.env.YAP_HANDLE
+  ?? userInfo().username
+  ?? `user-${randomBytes(3).toString("hex")}`;
+
+// If no tree URL provided, we start our own embedded tree
+const externalTreeUrl = process.env.YAP_TREE_URL;
+const EMBEDDED_TREE_PORT = 18790 + Math.floor(Math.random() * 100);
+let embeddedTree: TreeInstance | null = null;
 
 function parseList(env: string | undefined): string[] {
   if (!env) return [];
@@ -30,76 +40,16 @@ const comfortZone: ComfortZone = {
   never_share: parseList(process.env.YAP_NEVER_SHARE) || ["health_info", "financial_details"],
 };
 
-// --- Shared state ---
+// --- Shared state (initialized in main) ---
 
 const buffer = new EventBuffer();
 const consentPrompter = new McpConsentPrompter(buffer);
-
-const agent = new YapAgent({
-  handle,
-  treeUrl,
-  comfortZone,
-  prompter: consentPrompter,
-  userData: {},
-});
+let agent: YapAgent;
+let treeUrl: string;
 
 // Stashed callbacks for async decisions
 const decideFns = new Map<string, (decision: "confirm" | "decline", reason?: string) => void>();
 const respondFns = new Map<string, (context: Record<string, unknown>) => void>();
-
-// --- Wire agent events into buffer ---
-
-agent.onContext((threadId, context) => {
-  buffer.push(threadId, "context_received", { context });
-});
-
-agent.onChirp((threadId, needs, respond) => {
-  buffer.push(threadId, "chirp_received", {
-    needs: needs.map((n) => ({ field: n.field, reason: n.reason, priority: n.priority })),
-  });
-  respondFns.set(threadId, respond);
-});
-
-agent.onLanding((threadId, proposal, decide) => {
-  buffer.push(threadId, "landing_proposed", { proposal });
-  decideFns.set(threadId, decide);
-});
-
-agent.onConfirmed((threadId) => {
-  buffer.push(threadId, "confirmed", {});
-});
-
-agent.onDeclined((threadId, reason) => {
-  buffer.push(threadId, "declined", { reason });
-});
-
-agent.onStalled((threadId) => {
-  buffer.push(threadId, "stalled", {});
-});
-
-agent.onError((err) => {
-  buffer.push(err.thread_id ?? "global", "error", {
-    code: err.code,
-    message: err.message,
-  });
-});
-
-agent.onSchemaProposal((threadId, extension, reason, from) => {
-  buffer.push(threadId, "context_received", {
-    type: "schema_proposal",
-    from,
-    extension,
-    reason,
-  });
-});
-
-agent.onSchemaConfirmed((threadId, schemaName, from) => {
-  buffer.push(threadId, "context_received", {
-    type: "schema_confirmed",
-    from,
-    schema_name: schemaName,
-  });
-});
 
 // --- MCP Server ---
 
@@ -486,9 +436,80 @@ server.tool(
   },
 );
 
+// Tool: manage_tree
+server.tool(
+  "yap_status",
+  "Check the status of your Yap connection — your handle, tree URL, whether the tree is embedded or external, and connection state.",
+  {},
+  async () => {
+    return {
+      content: [{
+        type: "text",
+        text: JSON.stringify({
+          handle: `@${handle}`,
+          tree_url: treeUrl,
+          tree_mode: embeddedTree ? "embedded (auto-started)" : "external",
+          connected: agent?.getHandle() ? true : false,
+          comfort_zone: agent?.getComfortZone(),
+        }, null, 2),
+      }],
+    };
+  },
+);
+
 // --- Start ---
 
 async function main() {
+  // Auto-start embedded tree if no external URL provided
+  if (externalTreeUrl) {
+    treeUrl = externalTreeUrl;
+  } else {
+    embeddedTree = createTree(EMBEDDED_TREE_PORT);
+    treeUrl = `ws://localhost:${EMBEDDED_TREE_PORT}`;
+  }
+
+  agent = new YapAgent({
+    handle,
+    treeUrl,
+    comfortZone,
+    prompter: consentPrompter,
+    platform: "claude-mcp",
+    userData: {},
+  });
+
+  // Wire agent events
+  agent.onContext((threadId, context) => {
+    buffer.push(threadId, "context_received", { context });
+  });
+  agent.onChirp((threadId, needs, respond) => {
+    buffer.push(threadId, "chirp_received", {
+      needs: needs.map((n) => ({ field: n.field, reason: n.reason, priority: n.priority })),
+    });
+    respondFns.set(threadId, respond);
+  });
+  agent.onLanding((threadId, proposal, decide) => {
+    buffer.push(threadId, "landing_proposed", { proposal });
+    decideFns.set(threadId, decide);
+  });
+  agent.onConfirmed((threadId) => {
+    buffer.push(threadId, "confirmed", {});
+  });
+  agent.onDeclined((threadId, reason) => {
+    buffer.push(threadId, "declined", { reason });
+  });
+  agent.onStalled((threadId) => {
+    buffer.push(threadId, "stalled", {});
+  });
+  agent.onError((err) => {
+    buffer.push(err.thread_id ?? "global", "error", { code: err.code, message: err.message });
+  });
+  agent.onSchemaProposal((threadId, extension, reason, from) => {
+    buffer.push(threadId, "context_received", { type: "schema_proposal", from, extension, reason });
+  });
+  agent.onSchemaConfirmed((threadId, schemaName, from) => {
+    buffer.push(threadId, "context_received", { type: "schema_confirmed", from, schema_name: schemaName });
+  });
+
   await agent.connect();
   const transport = new StdioServerTransport();
   await server.connect(transport);

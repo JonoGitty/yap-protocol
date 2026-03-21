@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "yap": {
+      "command": "npx",
+      "args": ["tsx", "C:/AI/yap-protocol/packages/claude-mcp/src/index.ts"],
+      "env": {
+        "YAP_HANDLE": "jono"
+      }
+    }
+  }
+}
