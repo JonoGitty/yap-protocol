@@ -48,7 +48,7 @@ const handle = process.env.YAP_HANDLE
 // 1. YAP_TREE_URL env var → use that (explicit external tree)
 // 2. Public tree at wss://tree.yapprotocol.dev → try that (when deployed)
 // 3. Fallback → start embedded local tree (development / offline)
-const PUBLIC_TREE_URL = "wss://tree.yapprotocol.dev";
+const PUBLIC_TREE_URL = "wss://yap-tree.fly.dev";
 const externalTreeUrl = process.env.YAP_TREE_URL;
 const EMBEDDED_TREE_PORT = 18790 + Math.floor(Math.random() * 100);
 let embeddedTree: TreeInstance | null = null;
