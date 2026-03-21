@@ -1,6 +1,7 @@
-import type { ContextUnavailable, Need, Proposal, YapPacket } from "./types.js";
+import type { Capabilities, ContextUnavailable, Intent, Need, Proposal, YapPacket } from "./types.js";
+import { CURRENT_VERSION, LOCAL_CAPABILITIES } from "./version.js";
 
-const PROTOCOL_VERSION = "yap/0.1";
+const PROTOCOL_VERSION = CURRENT_VERSION;
 
 export function generateId(prefix: string): string {
   const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
@@ -134,6 +135,90 @@ export function createContextResponseWithDeclines(
   };
 }
 
+export function createIntentUpdate(
+  threadId: string,
+  from: string,
+  to: string,
+  previousIntent: Intent,
+  updatedIntent: Intent,
+  additionalNeeds?: Need[],
+): YapPacket {
+  return {
+    protocol: PROTOCOL_VERSION,
+    packet_id: generateId("pkt"),
+    thread_id: threadId,
+    from,
+    to,
+    timestamp: new Date().toISOString(),
+    type: "intent_update",
+    previous_intent: previousIntent,
+    intent: updatedIntent,
+    needs: additionalNeeds,
+  };
+}
+
+export function createFork(
+  parentThreadId: string,
+  from: string,
+  to: string,
+  forkThreads: { thread_id: string; intent: Intent }[],
+  sharedContext?: Record<string, unknown>,
+): YapPacket {
+  return {
+    protocol: PROTOCOL_VERSION,
+    packet_id: generateId("pkt"),
+    thread_id: parentThreadId,
+    from,
+    to,
+    timestamp: new Date().toISOString(),
+    type: "thread_fork",
+    fork_threads: forkThreads,
+    shared_context: sharedContext,
+  };
+}
+
+export function createKeyExchange(
+  from: string,
+  to: string,
+  publicEncryptionKey: string,
+  publicSigningKey: string,
+): YapPacket {
+  return {
+    protocol: PROTOCOL_VERSION,
+    packet_id: generateId("pkt"),
+    thread_id: generateId("thr"),
+    from,
+    to,
+    timestamp: new Date().toISOString(),
+    type: "key_exchange",
+    public_encryption_key: publicEncryptionKey,
+    public_signing_key: publicSigningKey,
+    capabilities: LOCAL_CAPABILITIES,
+  };
+}
+
+export function createNestUpdate(
+  threadId: string,
+  from: string,
+  to: string,
+  nestId: string,
+  fields: Record<string, unknown>,
+  version: number,
+): YapPacket {
+  return {
+    protocol: PROTOCOL_VERSION,
+    packet_id: generateId("pkt"),
+    thread_id: threadId,
+    from,
+    to,
+    timestamp: new Date().toISOString(),
+    type: "nest_update",
+    nest_id: nestId,
+    nest_fields: fields,
+    nest_version: version,
+  };
+}
+
 export function validateYap(yap: unknown): { valid: boolean; errors: string[] } {
   const errors: string[] = [];
 
@@ -150,17 +235,9 @@ export function validateYap(yap: unknown): { valid: boolean; errors: string[] } 
   if (typeof p.to !== "string") errors.push("Missing or invalid 'to' field");
   if (typeof p.timestamp !== "string") errors.push("Missing or invalid 'timestamp' field");
 
-  const validTypes = [
-    "context",
-    "context_request",
-    "context_response",
-    "resolution",
-    "resolution_response",
-    "intent_update",
-    "error",
-  ];
-  if (!validTypes.includes(p.type as string)) {
-    errors.push(`Invalid 'type' field: ${p.type}. Must be one of: ${validTypes.join(", ")}`);
+  // Forward compatibility: accept unknown types (treat as context) rather than rejecting
+  if (typeof p.type !== "string") {
+    errors.push("Missing or invalid 'type' field");
   }
 
   return { valid: errors.length === 0, errors };

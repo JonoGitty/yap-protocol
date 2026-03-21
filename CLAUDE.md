@@ -96,6 +96,12 @@ Three tiers per user, with per-relationship overrides:
 - `ask_first` — triggers a check (dietary, budget, location)
 - `never_share` — excluded, no hint given (health, financial, private)
 
+### Dynamic Schema Negotiation
+
+When freeform context isn't structured enough for a complex task, agents negotiate a custom schema on the fly. One agent proposes typed fields, the other reviews/modifies/accepts, then both sides fill in the schema — yapping until 100% complete with all conflicts resolved. Schemas can include service integrations (Spotify, Google Maps, etc.). Proven schemas get cached in flock memory and reused. See `docs/DYNAMIC_SCHEMAS.md` for the full spec.
+
+**Key principle: agents keep yapping until both sides report 100% schema completion. A branch MUST NOT reach PROPOSED while any field is unresolved.**
+
 ### Flock Memory (Relationship Memory)
 
 Stored locally. Tracks patterns per relationship:

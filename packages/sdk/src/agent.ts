@@ -1,4 +1,5 @@
 import type {
+  Capabilities,
   ContextUnavailable,
   Intent,
   Need,
@@ -19,6 +20,7 @@ import {
   createDecline,
   generateId,
 } from "./yap.js";
+import { LOCAL_CAPABILITIES, negotiateVersion } from "./version.js";
 
 const MAX_ROUND_TRIPS = 8;
 const DEFAULT_URGENT_TIMEOUT_MS = 2 * 60 * 60 * 1000; // 2 hours
@@ -49,6 +51,7 @@ export class YapAgent {
   private nonUrgentTimeoutMs: number;
   private threadTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private threadUrgency = new Map<string, string>();
+  private remoteCapabilities = new Map<string, Capabilities>();
   private handle: string;
 
   // Event handlers
@@ -59,6 +62,13 @@ export class YapAgent {
   private declinedHandler?: (threadId: string, reason?: string) => void;
   private stalledHandler?: (threadId: string) => void;
   private errorHandler?: (error: YapError) => void;
+  private intentUpdateHandler?: (threadId: string, prev: Intent, updated: Intent, needs: Need[]) => void;
+  private forkHandler?: (parentThreadId: string, forks: { thread_id: string; intent: Intent }[]) => void;
+  private nestUpdateHandler?: (nestId: string, fields: Record<string, unknown>, from: string) => void;
+  private promotionHandler?: (agent: string, field: string, count: number) => void;
+  private schemaProposalHandler?: (threadId: string, extension: Record<string, unknown>, reason: string, from: string) => void;
+  private schemaResponseHandler?: (threadId: string, status: string, modifications: Record<string, unknown> | undefined, from: string) => void;
+  private schemaConfirmedHandler?: (threadId: string, schemaName: string, from: string) => void;
 
   constructor(config: AgentConfig) {
     this.handle = config.handle.startsWith("@") ? config.handle : `@${config.handle}`;
@@ -126,6 +136,7 @@ export class YapAgent {
       intent,
       context,
       needs,
+      capabilities: LOCAL_CAPABILITIES,
       permissions: {
         shared_fields: Object.keys(context),
         withheld_fields: [],
@@ -137,6 +148,59 @@ export class YapAgent {
     this.threadUrgency.set(threadId, intent.urgency);
     this.startTimeout(threadId);
     this.client.send(yap);
+    return threadId;
+  }
+
+  /** Send context without requesting anything back. For briefings, reports, invoices, etc. */
+  async sendOneShot(
+    to: string,
+    intent: Intent,
+    context: Record<string, unknown>,
+  ): Promise<string> {
+    return this.startBranch(to, intent, context, []);
+  }
+
+  /** Start a multi-party branch — sends context to all participants. */
+  async startGroupBranch(
+    participants: string[],
+    intent: Intent,
+    context: Record<string, unknown>,
+    needs: Need[],
+  ): Promise<string> {
+    const threadId = generateId("thr");
+    const participantInfos = participants.map((h) => ({
+      handle: h,
+      role: "participant" as const,
+      status: "invited" as const,
+    }));
+
+    for (const to of participants) {
+      const yap = createYap({
+        thread_id: threadId,
+        from: this.handle,
+        to,
+        type: "context",
+        intent,
+        context,
+        needs,
+        capabilities: LOCAL_CAPABILITIES,
+        coordinator: this.handle,
+        participants: [
+          { handle: this.handle, role: "coordinator", status: "joined" },
+          ...participantInfos,
+        ],
+        permissions: {
+          shared_fields: Object.keys(context),
+          withheld_fields: [],
+          consent_level: "user_preauthorised",
+        },
+      });
+      this.branches.addPacket(threadId, yap);
+      this.client.send(yap);
+    }
+
+    this.threadUrgency.set(threadId, intent.urgency);
+    this.startTimeout(threadId);
     return threadId;
   }
 
@@ -179,6 +243,39 @@ export class YapAgent {
     this.errorHandler = handler;
   }
 
+  onIntentUpdate(handler: (threadId: string, prev: Intent, updated: Intent, needs: Need[]) => void): void {
+    this.intentUpdateHandler = handler;
+  }
+
+  onFork(handler: (parentThreadId: string, forks: { thread_id: string; intent: Intent }[]) => void): void {
+    this.forkHandler = handler;
+  }
+
+  onNestUpdate(handler: (nestId: string, fields: Record<string, unknown>, from: string) => void): void {
+    this.nestUpdateHandler = handler;
+  }
+
+  onPromotionSuggested(handler: (agent: string, field: string, count: number) => void): void {
+    this.promotionHandler = handler;
+  }
+
+  onSchemaProposal(handler: (threadId: string, extension: Record<string, unknown>, reason: string, from: string) => void): void {
+    this.schemaProposalHandler = handler;
+  }
+
+  onSchemaResponse(handler: (threadId: string, status: string, modifications: Record<string, unknown> | undefined, from: string) => void): void {
+    this.schemaResponseHandler = handler;
+  }
+
+  onSchemaConfirmed(handler: (threadId: string, schemaName: string, from: string) => void): void {
+    this.schemaConfirmedHandler = handler;
+  }
+
+  /** Get the negotiated capabilities for a remote agent. */
+  getRemoteCapabilities(agent: string): Capabilities | undefined {
+    return this.remoteCapabilities.get(agent);
+  }
+
   // --- Internal packet router ---
 
   private async handlePacket(yap: YapPacket): Promise<void> {
@@ -189,6 +286,11 @@ export class YapAgent {
     // Track urgency from initial intent
     if (yap.intent?.urgency && !this.threadUrgency.has(threadId)) {
       this.threadUrgency.set(threadId, yap.intent.urgency);
+    }
+
+    // Store remote capabilities on first packet from an agent
+    if (yap.capabilities && !this.remoteCapabilities.has(yap.from)) {
+      this.remoteCapabilities.set(yap.from, yap.capabilities);
     }
 
     switch (yap.type) {
@@ -206,6 +308,50 @@ export class YapAgent {
         break;
       case "resolution_response":
         this.handleResolutionResponse(yap);
+        break;
+      case "intent_update":
+        this.intentUpdateHandler?.(
+          threadId,
+          yap.previous_intent ?? yap.intent!,
+          yap.intent!,
+          yap.needs ?? [],
+        );
+        break;
+      case "thread_fork":
+        if (yap.fork_threads) {
+          for (const fork of yap.fork_threads) {
+            this.branches.createBranch(fork.thread_id, threadId);
+          }
+          this.forkHandler?.(threadId, yap.fork_threads);
+        }
+        break;
+      case "nest_update":
+        if (yap.nest_id && yap.nest_fields) {
+          this.nestUpdateHandler?.(yap.nest_id, yap.nest_fields, yap.from);
+        }
+        break;
+      case "schema_proposal":
+        this.schemaProposalHandler?.(
+          threadId,
+          yap.context?.extension as Record<string, unknown> ?? {},
+          yap.context?.reason as string ?? "",
+          yap.from,
+        );
+        break;
+      case "schema_response":
+        this.schemaResponseHandler?.(
+          threadId,
+          yap.context?.status as string ?? "",
+          yap.context?.modifications as Record<string, unknown> | undefined,
+          yap.from,
+        );
+        break;
+      case "schema_confirmed":
+        this.schemaConfirmedHandler?.(
+          threadId,
+          yap.context?.agreed_schema as string ?? "",
+          yap.from,
+        );
         break;
       case "error":
         this.errorHandler?.({
@@ -325,7 +471,7 @@ export class YapAgent {
     needs: Need[],
     threadSummary: string,
   ): Promise<void> {
-    const { auto_share, needs_consent, declined } = classifyNeeds(this.zone, needs);
+    const { auto_share, needs_consent, declined } = classifyNeeds(this.zone, needs, toAgent);
 
     const provided: Record<string, unknown> = {};
     const unavailable: ContextUnavailable[] = [];

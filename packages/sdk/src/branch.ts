@@ -3,13 +3,14 @@ import type { BranchState, BranchStateValue, YapPacket } from "./types.js";
 export class BranchManager {
   private branches = new Map<string, BranchState>();
 
-  createBranch(threadId: string): BranchState {
+  createBranch(threadId: string, parentThreadId?: string): BranchState {
     const branch: BranchState = {
       thread_id: threadId,
       state: "INITIATED",
       packets: [],
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
+      parent_thread_id: parentThreadId,
     };
     this.branches.set(threadId, branch);
     return branch;

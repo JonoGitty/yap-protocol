@@ -12,6 +12,13 @@ export interface YapPacket {
     | "resolution"
     | "resolution_response"
     | "intent_update"
+    | "thread_fork"
+    | "coordinator_transfer"
+    | "key_exchange"
+    | "nest_update"
+    | "schema_proposal"
+    | "schema_response"
+    | "schema_confirmed"
     | "error";
   intent?: Intent;
   context?: Record<string, unknown>;
@@ -22,7 +29,34 @@ export interface YapPacket {
   proposal?: Proposal;
   status?: "confirmed" | "declined";
   reason_class?: string;
+
+  // Version handshake (Step 2)
+  capabilities?: Capabilities;
+
+  // Multi-party (Step 4)
+  participants?: ParticipantInfo[];
+  coordinator?: string;
+
+  // Context drift (Step 6)
+  previous_intent?: Intent;
+  fork_threads?: { thread_id: string; intent: Intent }[];
+  shared_context?: Record<string, unknown>;
+
+  // Encryption (Step 7)
+  encrypted?: boolean;
+  ciphertext?: string;
+  nonce?: string;
+  signature?: string;
+  public_encryption_key?: string;
+  public_signing_key?: string;
+
+  // Nests (Step 8)
+  nest_id?: string;
+  nest_fields?: Record<string, unknown>;
+  nest_version?: number;
 }
+
+// --- Core types ---
 
 export interface Intent {
   category: string;
@@ -60,6 +94,8 @@ export interface Alternative {
   reason: string;
 }
 
+// --- Branch state ---
+
 export type BranchStateValue =
   | "INITIATED"
   | "NEGOTIATING"
@@ -77,7 +113,10 @@ export interface BranchState {
   packets: YapPacket[];
   created_at: string;
   updated_at: string;
+  parent_thread_id?: string;
 }
+
+// --- Errors ---
 
 export type YapErrorCode =
   | "LOOP_LIMIT"
@@ -90,4 +129,59 @@ export interface YapError {
   code: YapErrorCode;
   thread_id?: string;
   message: string;
+}
+
+// --- Version handshake (Step 2) ---
+
+export interface Capabilities {
+  supported_versions: string[];
+  features: string[];
+  max_context_size_bytes?: number;
+  supported_encryption?: string[];
+}
+
+// --- Multi-party (Step 4) ---
+
+export interface ParticipantInfo {
+  handle: string;
+  role: "coordinator" | "participant";
+  status: "invited" | "joined" | "context_received" | "confirmed" | "declined";
+}
+
+// --- Flock memory (Step 5) ---
+
+export interface FlockEntry {
+  agent: string;
+  user_label?: string;
+  interaction_count: number;
+  first_interaction: string;
+  last_interaction: string;
+  typical_intents: string[];
+  learned_patterns: {
+    usually_shares: string[];
+    usually_declines: string[];
+    average_response_time_ms: number;
+    preferred_resolution_style?: string;
+  };
+  context_cache: Record<string, {
+    value: unknown;
+    updated: string;
+    confidence: "high" | "medium" | "low";
+  }>;
+  trust_level: "new" | "developing" | "established" | "trusted";
+}
+
+// --- Nests (Step 8) ---
+
+export interface NestState {
+  nest_id: string;
+  participants: string[];
+  fields: Record<string, {
+    value: unknown;
+    version: number;
+    updated_by: string;
+    updated_at: string;
+  }>;
+  created_at: string;
+  updated_at: string;
 }
