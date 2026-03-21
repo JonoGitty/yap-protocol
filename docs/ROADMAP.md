@@ -56,33 +56,38 @@
 - [x] Dockerfile (Alpine, non-root, health check)
 - [x] Fly.io config (fly.toml)
 - [x] Caddy config (auto TLS, security headers)
-- [x] Production server entry point
+- [x] Production server entry point (WebSocket + HTTP API on same port)
 - [x] Zero secrets in code (.gitignore blocks all data files)
-- [x] Domain: yapprotocol.dev (bought)
+- [x] Domain: yapprotocol.dev (bought and configured)
+- [x] Live tree at tree.yapprotocol.dev (deployed on Fly.io)
+- [x] Handle registration live (POST /register)
+- [x] Multi-channel notifications (Slack, Discord, email)
+- [x] Contact gating + spam protection (anyone/contacts_only/ask_first)
 
 ---
 
 ## What's Next
 
 ### Handle System & Identity
-- [ ] **Unique handle enforcement** — tree guarantees no two users share the same @handle (registration API already validates, needs persistence across restarts)
-- [ ] **Handle reservation** — reserve your handle before anyone else
+- [x] **Unique handle enforcement** — tree rejects duplicate handles
+- [x] **Handle registration** — POST /register with invite code
 - [ ] **Handle search** — `GET /search?q=jono` fuzzy search on the tree
-- [ ] **Contact list in Claude** — Claude stores known handles locally, suggests them when you say "yap with Bob"
+- [x] **Contact list in Claude** — via yap_contacts tool
 - [ ] **Share links** — `yapprotocol.dev/@jono` pages for sharing your handle
 - [ ] **QR codes** — generate scannable codes for in-person contact exchange
 
 ### Going Live
-- [ ] **Deploy public tree** at `tree.yapprotocol.dev` (Fly.io)
-- [ ] **DNS setup** for tree.yapprotocol.dev and api.yapprotocol.dev
-- [ ] **Invite system** — soft launch with invite codes
+- [x] **Deploy public tree** at `tree.yapprotocol.dev` (Fly.io)
+- [x] **DNS setup** for tree.yapprotocol.dev
+- [x] **Invite system** — soft launch with invite code "earlybird"
 - [ ] **npm publish** — `@yap-protocol/sdk` and `@yap-protocol/tree`
 - [ ] **MCP server on npm** — `npx @yap-protocol/mcp` just works globally
 
 ### Claude-Native Experience
-- [ ] **Contact management via Claude** — "add @bob to my contacts", "who do I know?"
+- [x] **Contact management via Claude** — yap_contacts tool (add/remove/list/approve)
 - [ ] **Smart handle resolution** — "yap with Bob" → Claude checks contacts for a Bob
-- [ ] **Yap notifications** — Claude proactively tells you when a yap arrives
+- [x] **Yap notifications** — multi-channel (Slack, Discord, email) + in-Claude notifications
+- [x] **Privacy controls** — yap_privacy tool (anyone/contacts_only/ask_first)
 - [ ] **Conversation history** — Claude remembers past yaps with each contact
 - [ ] **Service integration prompts** — "we're scheduling, should I check your calendar?"
 

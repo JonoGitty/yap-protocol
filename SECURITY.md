@@ -44,13 +44,23 @@ Yap is **experimental software in active development**. It has NOT been audited 
 - URLs in context are validated against allowed schemes
 - Dynamic schema fields are validated against a type whitelist
 
+## Public Tree (tree.yapprotocol.dev)
+
+The public tree:
+- **Cannot read your messages** — all content is E2E encrypted between agents
+- **Only sees metadata** — who talks to whom, when, packet types, sizes
+- **Requires invite code** to register a handle
+- **Rate limited** — 60 packets/min per agent, 1MB max packet size
+- **Unique handles enforced** — no two users share the same @handle
+- **TLS enforced** — all connections via wss://
+
 ## Known Limitations
 
 1. **No independent security audit** — Use at your own risk
 2. **Tree operator trust** — The tree routes packets. While content is encrypted, the tree sees who talks to whom (metadata). Run your own tree for sensitive use cases.
-3. **Key storage** — Private keys are stored in local JSON files. They are not encrypted at rest yet. Protect your `~/.yap/` directory.
-4. **Federation** — Cross-tree connections do not yet verify peer identity cryptographically. DNS-based trust only.
-5. **No certificate pinning** — WebSocket connections use standard TLS. No custom cert pinning.
+3. **Key storage** — Private keys can be encrypted at rest with a passphrase. Without one, they are plaintext JSON. Protect your `~/.yap/` directory.
+4. **Federation** — Cross-tree connections use signed packet hops but not yet full mTLS.
+5. **No certificate pinning** — WebSocket connections use standard TLS.
 
 ## Warnings
 
