@@ -55,6 +55,12 @@ let treeUrl: string;
 const decideFns = new Map<string, (decision: "confirm" | "decline", reason?: string) => void>();
 const respondFns = new Map<string, (context: Record<string, unknown>) => void>();
 
+// Contact gating: only accept yaps from known contacts or allow on first contact
+type IncomingPolicy = "anyone" | "contacts_only" | "ask_first";
+let incomingPolicy: IncomingPolicy = (process.env.YAP_INCOMING_POLICY as IncomingPolicy) ?? "ask_first";
+const knownContacts = new Set<string>();
+const pendingApprovals = new Map<string, { threadId: string; intent: string; from: string }>();
+
 // --- MCP Server ---
 
 const server = new McpServer({
@@ -440,6 +446,74 @@ server.tool(
   },
 );
 
+// Tool: contacts
+server.tool(
+  "yap_contacts",
+  `Manage your Yap contact list. Add, remove, or list known contacts. Only contacts (or approved agents) can send you yaps when incoming policy is "contacts_only" or "ask_first".`,
+  {
+    action: z.enum(["list", "add", "remove", "approve_pending"]).describe("What to do"),
+    handle: z.string().optional().describe("Agent handle (for add/remove/approve)"),
+  },
+  async ({ action, handle: contactHandle }) => {
+    switch (action) {
+      case "list":
+        return {
+          content: [{ type: "text", text: JSON.stringify({
+            contacts: [...knownContacts],
+            incoming_policy: incomingPolicy,
+            pending_approvals: [...pendingApprovals.entries()].map(([k, v]) => ({ from: v.from, intent: v.intent })),
+          }, null, 2) }],
+        };
+      case "add":
+        if (contactHandle) {
+          const h = contactHandle.startsWith("@") ? contactHandle : `@${contactHandle}`;
+          knownContacts.add(h);
+          return { content: [{ type: "text", text: `Added ${h} to contacts.` }] };
+        }
+        return { content: [{ type: "text", text: "Provide a handle to add." }], isError: true };
+      case "remove":
+        if (contactHandle) {
+          const h = contactHandle.startsWith("@") ? contactHandle : `@${contactHandle}`;
+          knownContacts.delete(h);
+          return { content: [{ type: "text", text: `Removed ${h} from contacts.` }] };
+        }
+        return { content: [{ type: "text", text: "Provide a handle to remove." }], isError: true };
+      case "approve_pending":
+        if (contactHandle) {
+          const h = contactHandle.startsWith("@") ? contactHandle : `@${contactHandle}`;
+          const pending = pendingApprovals.get(h);
+          if (pending) {
+            knownContacts.add(h);
+            pendingApprovals.delete(h);
+            return { content: [{ type: "text", text: `Approved ${h} and added to contacts. Their yap is now in your inbox.` }] };
+          }
+          return { content: [{ type: "text", text: `No pending request from ${h}.` }], isError: true };
+        }
+        return { content: [{ type: "text", text: "Provide a handle to approve." }], isError: true };
+      default:
+        return { content: [{ type: "text", text: "Unknown action." }], isError: true };
+    }
+  },
+);
+
+// Tool: set incoming policy
+server.tool(
+  "yap_privacy",
+  `Control who can send you yaps.
+- "anyone": accept yaps from everyone (open)
+- "contacts_only": only accept from your contact list (strict)
+- "ask_first": accept from contacts automatically, queue unknown senders for your approval (recommended)`,
+  {
+    policy: z.enum(["anyone", "contacts_only", "ask_first"]).describe("Who can yap at you"),
+  },
+  async ({ policy }) => {
+    incomingPolicy = policy;
+    return {
+      content: [{ type: "text", text: `Incoming policy set to "${policy}".${policy === "ask_first" ? " Unknown agents will be queued for your approval." : ""}` }],
+    };
+  },
+);
+
 // Tool: manage_tree
 server.tool(
   "yap_status",
@@ -495,35 +569,110 @@ async function main() {
     userData: {},
   });
 
-  // Wire agent events
+  // --- Contact gating helper ---
+  // Returns true if the sender is allowed, false if blocked/queued
+  function checkIncomingPolicy(from: string, threadId: string, intentSummary: string): boolean {
+    if (incomingPolicy === "anyone") return true;
+    if (knownContacts.has(from)) return true;
+
+    if (incomingPolicy === "contacts_only") {
+      // Silently drop — they're not in contacts
+      return false;
+    }
+
+    // "ask_first" — queue for approval
+    if (!pendingApprovals.has(from)) {
+      pendingApprovals.set(from, { threadId, intent: intentSummary, from });
+      // Notify Claude about the pending request
+      buffer.push("notifications", "context_received", {
+        notification: true,
+        type: "incoming_request",
+        from,
+        intent: intentSummary,
+        message: `${from} wants to yap with you about: "${intentSummary}". Use yap_contacts(action: "approve_pending", handle: "${from}") to accept, or ignore to decline.`,
+      });
+    }
+    return false;
+  }
+
+  // --- Wire agent events with contact gating + notifications ---
+
   agent.onContext((threadId, context) => {
+    // Get the branch to find sender
+    const branch = agent.getBranch(threadId);
+    const lastPacket = branch?.packets[branch.packets.length - 1];
+    const from = lastPacket?.from ?? "unknown";
+    const intentSummary = lastPacket?.intent?.summary ?? "unknown";
+
+    if (!checkIncomingPolicy(from, threadId, intentSummary)) return;
+
     buffer.push(threadId, "context_received", { context });
+    // Notify Claude
+    buffer.push("notifications", "context_received", {
+      notification: true,
+      type: "yap_received",
+      from,
+      thread_id: threadId,
+      message: `${from} sent you context${intentSummary !== "unknown" ? ` about "${intentSummary}"` : ""}. Use check_branch to see details.`,
+    });
   });
+
   agent.onChirp((threadId, needs, respond) => {
     buffer.push(threadId, "chirp_received", {
       needs: needs.map((n) => ({ field: n.field, reason: n.reason, priority: n.priority })),
     });
     respondFns.set(threadId, respond);
+    buffer.push("notifications", "context_received", {
+      notification: true,
+      type: "chirp_received",
+      thread_id: threadId,
+      message: `Someone is asking for: ${needs.map((n) => n.field).join(", ")}. Use check_branch("${threadId}") then respond_to_chirp.`,
+    });
   });
+
   agent.onLanding((threadId, proposal, decide) => {
     buffer.push(threadId, "landing_proposed", { proposal });
     decideFns.set(threadId, decide);
+    buffer.push("notifications", "context_received", {
+      notification: true,
+      type: "landing_proposed",
+      thread_id: threadId,
+      message: `Proposal received: "${proposal.summary}". Use check_branch("${threadId}") to review, then confirm_landing or decline_landing.`,
+    });
   });
+
   agent.onConfirmed((threadId) => {
     buffer.push(threadId, "confirmed", {});
+    buffer.push("notifications", "context_received", {
+      notification: true,
+      type: "confirmed",
+      thread_id: threadId,
+      message: `Branch ${threadId} confirmed! Agreement reached.`,
+    });
   });
+
   agent.onDeclined((threadId, reason) => {
     buffer.push(threadId, "declined", { reason });
+    buffer.push("notifications", "context_received", {
+      notification: true,
+      type: "declined",
+      thread_id: threadId,
+      message: `Branch ${threadId} declined${reason ? `: ${reason}` : ""}.`,
+    });
   });
+
   agent.onStalled((threadId) => {
     buffer.push(threadId, "stalled", {});
   });
+
   agent.onError((err) => {
     buffer.push(err.thread_id ?? "global", "error", { code: err.code, message: err.message });
   });
+
   agent.onSchemaProposal((threadId, extension, reason, from) => {
     buffer.push(threadId, "context_received", { type: "schema_proposal", from, extension, reason });
   });
+
   agent.onSchemaConfirmed((threadId, schemaName, from) => {
     buffer.push(threadId, "context_received", { type: "schema_confirmed", from, schema_name: schemaName });
   });
