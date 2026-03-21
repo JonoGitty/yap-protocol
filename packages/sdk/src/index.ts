@@ -53,6 +53,12 @@ export {
   decryptPacket,
 } from "./crypto.js";
 export { Keystore } from "./keystore.js";
+export { ContactList } from "./contacts.js";
+export {
+  discoverServices,
+  formatServiceSuggestions,
+  type ServiceSuggestion,
+} from "./service-discovery.js";
 export {
   DynamicSchemaManager,
   type SchemaFieldDef,
@@ -83,4 +89,7 @@ export type {
   ParticipantInfo,
   FlockEntry,
   NestState,
+  ConnectedService,
+  ServiceVisibilityPolicy,
+  Contact,
 } from "./types.js";

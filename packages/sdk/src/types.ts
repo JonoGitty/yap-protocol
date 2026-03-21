@@ -133,11 +133,46 @@ export interface YapError {
 
 // --- Version handshake (Step 2) ---
 
+export interface ConnectedService {
+  service: string;
+  capabilities: string[];
+  description?: string;
+  /** When to reveal this service to other agents */
+  visibility: "public" | "trusted_only" | "on_request" | "private";
+}
+
+/** Controls what service info is shared during handshake */
+export interface ServiceVisibilityPolicy {
+  /** Default visibility for services not explicitly configured */
+  default_visibility: "public" | "trusted_only" | "on_request" | "private";
+  /** Minimum trust level to reveal trusted_only services */
+  trusted_threshold: "developing" | "established" | "trusted";
+  /** Services to never reveal regardless of trust */
+  hidden_services: string[];
+}
+
 export interface Capabilities {
   supported_versions: string[];
   features: string[];
+  platform?: string;
+  platform_version?: string;
+  connected_services?: ConnectedService[];
   max_context_size_bytes?: number;
   supported_encryption?: string[];
+}
+
+// --- Contact list ---
+
+export interface Contact {
+  handle: string;
+  label?: string;
+  notes?: string;
+  platform?: string;
+  connected_services?: ConnectedService[];
+  first_seen: string;
+  last_seen: string;
+  last_thread_id?: string;
+  trust_level?: "new" | "developing" | "established" | "trusted";
 }
 
 // --- Multi-party (Step 4) ---

@@ -1,12 +1,16 @@
 import type {
   Capabilities,
+  ConnectedService,
   ContextUnavailable,
   Intent,
   Need,
   Proposal,
+  ServiceVisibilityPolicy,
   YapError,
   YapPacket,
 } from "./types.js";
+import { ContactList } from "./contacts.js";
+import { discoverServices, type ServiceSuggestion } from "./service-discovery.js";
 import { YapClient } from "./client.js";
 import { BranchManager } from "./branch.js";
 import type { ComfortZone } from "./comfort-zone.js";
@@ -32,6 +36,14 @@ export interface AgentConfig {
   comfortZone: ComfortZone;
   prompter: ConsentPrompter;
   userData?: Record<string, unknown>;
+  /** Platform identifier (e.g. "claude-mcp", "openclaw", "terminal") */
+  platform?: string;
+  /** Services this agent can access */
+  connectedServices?: ConnectedService[];
+  /** Controls what service info is shared */
+  serviceVisibility?: ServiceVisibilityPolicy;
+  /** Path for storing contacts (e.g. "~/.yap/contacts.json") */
+  contactsPath?: string;
   timeouts?: {
     urgent_ms?: number;
     non_urgent_ms?: number;
@@ -53,6 +65,11 @@ export class YapAgent {
   private threadUrgency = new Map<string, string>();
   private remoteCapabilities = new Map<string, Capabilities>();
   private handle: string;
+  private platform: string;
+  private allServices: ConnectedService[];
+  private servicePolicy: ServiceVisibilityPolicy;
+  private contacts: ContactList | null = null;
+  private serviceDiscoveryHandler?: (threadId: string, suggestions: ServiceSuggestion[]) => void;
 
   // Event handlers
   private chirpHandler?: (threadId: string, needs: Need[], respond: RespondFn) => void;
@@ -78,6 +95,16 @@ export class YapAgent {
     this.zone = config.comfortZone;
     this.prompter = config.prompter;
     this.userData = config.userData ?? {};
+    this.platform = config.platform ?? "unknown";
+    this.allServices = config.connectedServices ?? [];
+    this.servicePolicy = config.serviceVisibility ?? {
+      default_visibility: "on_request",
+      trusted_threshold: "established",
+      hidden_services: [],
+    };
+    if (config.contactsPath) {
+      this.contacts = new ContactList(config.contactsPath);
+    }
     this.urgentTimeoutMs = config.timeouts?.urgent_ms ?? DEFAULT_URGENT_TIMEOUT_MS;
     this.nonUrgentTimeoutMs = config.timeouts?.non_urgent_ms ?? DEFAULT_NON_URGENT_TIMEOUT_MS;
 
@@ -85,6 +112,7 @@ export class YapAgent {
   }
 
   async connect(): Promise<void> {
+    if (this.contacts) await this.contacts.load();
     await this.client.connect();
   }
 
@@ -94,6 +122,52 @@ export class YapAgent {
     }
     this.threadTimers.clear();
     this.client.disconnect();
+    if (this.contacts) this.contacts.save().catch(() => {});
+  }
+
+  /**
+   * Get services safe to share with a specific agent, respecting visibility policy.
+   * - "public" services: always shared
+   * - "trusted_only": only shared if agent meets trust threshold
+   * - "on_request": only shared when relevant to the current intent
+   * - "private": never shared
+   * - hidden_services: never shared regardless
+   */
+  getVisibleServices(forAgent?: string, intentCategory?: string): ConnectedService[] {
+    const trustLevel = forAgent
+      ? (this.contacts?.get(forAgent)?.trust_level ?? "new")
+      : "new";
+
+    const trustRank = { new: 0, developing: 1, established: 2, trusted: 3 };
+    const thresholdRank = trustRank[this.servicePolicy.trusted_threshold];
+    const agentRank = trustRank[trustLevel];
+
+    return this.allServices.filter((s) => {
+      if (this.servicePolicy.hidden_services.includes(s.service)) return false;
+      const vis = s.visibility ?? this.servicePolicy.default_visibility;
+      if (vis === "private") return false;
+      if (vis === "public") return true;
+      if (vis === "trusted_only") return agentRank >= thresholdRank;
+      if (vis === "on_request") return !!intentCategory;
+      return false;
+    });
+  }
+
+  /** Build capabilities with trust-filtered services for a specific agent. */
+  private buildCapabilitiesFor(forAgent?: string, intentCategory?: string): Capabilities {
+    return {
+      ...LOCAL_CAPABILITIES,
+      platform: this.platform,
+      connected_services: this.getVisibleServices(forAgent, intentCategory),
+    };
+  }
+
+  getContacts(): ContactList | null {
+    return this.contacts;
+  }
+
+  onServiceDiscovery(handler: (threadId: string, suggestions: ServiceSuggestion[]) => void): void {
+    this.serviceDiscoveryHandler = handler;
   }
 
   // --- Public accessors ---
@@ -136,7 +210,7 @@ export class YapAgent {
       intent,
       context,
       needs,
-      capabilities: LOCAL_CAPABILITIES,
+      capabilities: this.buildCapabilitiesFor(to, intent.category),
       permissions: {
         shared_fields: Object.keys(context),
         withheld_fields: [],
@@ -183,7 +257,7 @@ export class YapAgent {
         intent,
         context,
         needs,
-        capabilities: LOCAL_CAPABILITIES,
+        capabilities: this.buildCapabilitiesFor(to, intent.category),
         coordinator: this.handle,
         participants: [
           { handle: this.handle, role: "coordinator", status: "joined" },
@@ -291,6 +365,22 @@ export class YapAgent {
     // Store remote capabilities on first packet from an agent
     if (yap.capabilities && !this.remoteCapabilities.has(yap.from)) {
       this.remoteCapabilities.set(yap.from, yap.capabilities);
+      // Update contact list with their capabilities
+      if (this.contacts) {
+        this.contacts.updateFromCapabilities(yap.from, yap.capabilities);
+        this.contacts.recordInteraction(yap.from, threadId);
+      }
+      // Run service discovery if we have their services and an intent
+      if (yap.capabilities.connected_services && yap.intent && this.serviceDiscoveryHandler) {
+        const suggestions = discoverServices(
+          yap.intent,
+          this.getVisibleServices(yap.from, yap.intent.category),
+          yap.capabilities.connected_services,
+        );
+        if (suggestions.length > 0) {
+          this.serviceDiscoveryHandler(threadId, suggestions);
+        }
+      }
     }
 
     switch (yap.type) {
