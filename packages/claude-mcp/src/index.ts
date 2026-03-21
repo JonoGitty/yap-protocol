@@ -16,7 +16,8 @@ import { NotificationService, SlackNotifier, DiscordNotifier, EmailNotifier } fr
 import { EventBuffer } from "./event-buffer.js";
 import { McpConsentPrompter } from "./mcp-consent.js";
 import { randomBytes } from "node:crypto";
-import { hostname, userInfo } from "node:os";
+import { homedir, userInfo } from "node:os";
+import { join } from "node:path";
 
 // Unified notification service — channels configured via env or tools
 const notify = new NotificationService();
@@ -53,16 +54,22 @@ const externalTreeUrl = process.env.YAP_TREE_URL;
 const EMBEDDED_TREE_PORT = 18790 + Math.floor(Math.random() * 100);
 let embeddedTree: TreeInstance | null = null;
 
-function parseList(env: string | undefined): string[] {
-  if (!env) return [];
-  return env.split(",").map((s) => s.trim()).filter(Boolean);
+function parseList(env: string | undefined, fallback: string[]): string[] {
+  if (!env) return fallback;
+  const parsed = env.split(",").map((s) => s.trim()).filter(Boolean);
+  return parsed.length > 0 ? parsed : fallback;
 }
 
 const comfortZone: ComfortZone = {
-  always_share: parseList(process.env.YAP_ALWAYS_SHARE) || ["timezone", "general_availability"],
-  ask_first: parseList(process.env.YAP_ASK_FIRST) || ["dietary", "budget_range", "location_preference"],
-  never_share: parseList(process.env.YAP_NEVER_SHARE) || ["health_info", "financial_details"],
+  always_share: parseList(process.env.YAP_ALWAYS_SHARE, ["timezone", "general_availability"]),
+  ask_first: parseList(process.env.YAP_ASK_FIRST, ["dietary", "budget_range", "location_preference"]),
+  never_share: parseList(process.env.YAP_NEVER_SHARE, ["health_info", "financial_details"]),
 };
+
+const DEFAULT_DATA_DIR = join(homedir(), ".yap");
+const contactsPath = process.env.YAP_CONTACTS_PATH ?? join(DEFAULT_DATA_DIR, "contacts.json");
+const keystorePath = process.env.YAP_KEYSTORE_PATH ?? join(DEFAULT_DATA_DIR, "keys.json");
+const blocklistPath = process.env.YAP_BLOCKLIST_PATH ?? join(DEFAULT_DATA_DIR, "blocklist.json");
 
 // --- Shared state (initialized in main) ---
 
@@ -646,6 +653,11 @@ async function main() {
     prompter: consentPrompter,
     platform: "claude-mcp",
     userData: {},
+    authToken: process.env.YAP_AUTH_TOKEN,
+    contactsPath,
+    keystorePath,
+    keystorePassphrase: process.env.YAP_KEYSTORE_PASSPHRASE,
+    blocklistPath,
   });
 
   // --- Contact gating helper ---

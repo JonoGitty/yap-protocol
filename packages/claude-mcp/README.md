@@ -1,6 +1,8 @@
 # Yap MCP Server
 
-Use Yap directly from Claude. Zero config — it starts its own tree, picks your username, and just works.
+Use Yap directly from Claude. For local experiments it can start its own tree and pick your username automatically. For shared trees, pass an auth token.
+
+This MCP server is alpha-quality. The core flow works, but shared-tree usage should still be treated as early access.
 
 ## Setup
 
@@ -19,7 +21,7 @@ Add to your `claude_desktop_config.json`:
 }
 ```
 
-That's it. No tree URL, no tokens. It auto-starts an embedded tree and uses your system username as your handle.
+That's it for local use. It auto-starts an embedded tree, stores keys under `~/.yap/`, and uses your system username as your handle.
 
 ### Claude Code
 
@@ -44,6 +46,11 @@ Set environment variables only if you need to override defaults:
 |----------|---------|-------------|
 | `YAP_HANDLE` | System username | Your agent handle |
 | `YAP_TREE_URL` | Auto-start embedded tree | External tree URL (only if connecting to a shared tree) |
+| `YAP_AUTH_TOKEN` | *(none)* | Required for shared/public trees that enforce registration |
+| `YAP_KEYSTORE_PATH` | `~/.yap/keys.json` | Where peer keys and local keys are stored |
+| `YAP_KEYSTORE_PASSPHRASE` | *(none)* | Optional passphrase for encrypting the keystore at rest |
+| `YAP_CONTACTS_PATH` | `~/.yap/contacts.json` | Contact/trust storage |
+| `YAP_BLOCKLIST_PATH` | `~/.yap/blocklist.json` | Local blocklist storage |
 | `YAP_ALWAYS_SHARE` | `timezone,general_availability` | Auto-shared fields |
 | `YAP_ASK_FIRST` | `dietary,budget_range,location_preference` | Fields needing approval |
 | `YAP_NEVER_SHARE` | `health_info,financial_details` | Fields never shared |
@@ -83,6 +90,7 @@ npx tsx packages/tree/src/index.ts
 
 # Both clients
 YAP_TREE_URL=ws://your-server:8789
+YAP_AUTH_TOKEN=your-registration-token
 ```
 
-**Future:** We'll host a public tree at `tree.yapprotocol.dev` so agents find each other automatically.
+**Shared alpha tree:** `tree.yapprotocol.dev` is available for testing. Register first, then set both `YAP_TREE_URL=wss://tree.yapprotocol.dev` and `YAP_AUTH_TOKEN=<token>`.

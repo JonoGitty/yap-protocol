@@ -10,6 +10,13 @@ interface Registration {
   last_seen?: string;
 }
 
+export class RegistrationError extends Error {
+  constructor(message: string, readonly statusCode: number) {
+    super(message);
+    this.name = "RegistrationError";
+  }
+}
+
 export interface RegistrationConfig {
   /** Port for the HTTP registration API. */
   httpPort: number;
@@ -66,6 +73,10 @@ export class RegistrationServer {
 
   private runtimeTokens = new Map<string, string>();
 
+  private normaliseHandle(handle: string): string {
+    return handle.startsWith("@") ? handle : `@${handle}`;
+  }
+
   /** Validate a handle format. */
   private validateHandle(handle: string): string | null {
     if (!handle) return "Handle is required";
@@ -73,6 +84,51 @@ export class RegistrationServer {
     if (!/^[a-zA-Z0-9_-]+$/.test(handle)) return "Handle must be alphanumeric (with - and _)";
     if (/^(admin|system|tree|root|yap)$/i.test(handle)) return "Reserved handle";
     return null;
+  }
+
+  getRegistrationCount(): number {
+    return this.registrations.size;
+  }
+
+  isRegistered(handle: string): boolean {
+    return this.registrations.has(this.normaliseHandle(handle));
+  }
+
+  verifyToken(handle: string, token: string | null | undefined): boolean {
+    if (!token) return false;
+    const registration = this.registrations.get(this.normaliseHandle(handle));
+    if (!registration) return false;
+    const tokenHash = createHash("sha256").update(token).digest("hex");
+    return registration.token_hash === tokenHash;
+  }
+
+  async registerHandle(handle: string): Promise<{ handle: string; token: string }> {
+    const rawHandle = handle.startsWith("@") ? handle.slice(1) : handle;
+    const handleError = this.validateHandle(rawHandle);
+    if (handleError) {
+      throw new RegistrationError(handleError, 400);
+    }
+
+    const agentHandle = this.normaliseHandle(rawHandle);
+    if (this.registrations.has(agentHandle)) {
+      throw new RegistrationError("Handle already registered", 409);
+    }
+
+    const token = randomBytes(32).toString("hex");
+    const tokenHash = createHash("sha256").update(token).digest("hex");
+
+    const registration: Registration = {
+      handle: agentHandle,
+      token_hash: tokenHash,
+      created_at: new Date().toISOString(),
+    };
+
+    this.registrations.set(agentHandle, registration);
+    this.runtimeTokens.set(agentHandle, token);
+    await this.save();
+
+    console.log(`📋 Registered: ${agentHandle}`);
+    return { handle: agentHandle, token };
   }
 
   start(): void {
@@ -119,46 +175,20 @@ export class RegistrationServer {
         return;
       }
 
-      // Validate handle format
-      const handleError = this.validateHandle(handle);
-      if (handleError) {
-        res.writeHead(400);
-        res.end(JSON.stringify({ error: handleError }));
-        return;
-      }
-
-      const agentHandle = `@${handle}`;
-
-      // Check if already registered
-      if (this.registrations.has(agentHandle)) {
-        res.writeHead(409);
-        res.end(JSON.stringify({ error: "Handle already registered" }));
-        return;
-      }
-
-      // Generate token
-      const token = randomBytes(32).toString("hex");
-      const tokenHash = createHash("sha256").update(token).digest("hex");
-
-      const registration: Registration = {
-        handle: agentHandle,
-        token_hash: tokenHash,
-        created_at: new Date().toISOString(),
-      };
-
-      this.registrations.set(agentHandle, registration);
-      this.runtimeTokens.set(agentHandle, token);
-      await this.save();
-
-      console.log(`📋 Registered: ${agentHandle}`);
+      const registration = await this.registerHandle(handle);
 
       res.writeHead(201);
       res.end(JSON.stringify({
-        handle: agentHandle,
-        token,
+        handle: registration.handle,
+        token: registration.token,
         message: "Save this token — it cannot be recovered. Use it to connect: ws://tree?handle=X&token=Y",
       }));
-    } catch {
+    } catch (err) {
+      if (err instanceof RegistrationError) {
+        res.writeHead(err.statusCode);
+        res.end(JSON.stringify({ error: err.message }));
+        return;
+      }
       res.writeHead(400);
       res.end(JSON.stringify({ error: "Invalid request body" }));
     }
@@ -172,8 +202,8 @@ export class RegistrationServer {
       return;
     }
 
-    const agentHandle = handle.startsWith("@") ? handle : `@${handle}`;
-    const exists = this.registrations.has(agentHandle);
+    const agentHandle = this.normaliseHandle(handle);
+    const exists = this.isRegistered(agentHandle);
 
     res.writeHead(200);
     res.end(JSON.stringify({ handle: agentHandle, registered: exists }));
@@ -183,7 +213,7 @@ export class RegistrationServer {
     res.writeHead(200);
     res.end(JSON.stringify({
       protocol: "yap/0.2",
-      registered_agents: this.registrations.size,
+      registered_agents: this.getRegistrationCount(),
       registration_open: true,
       invite_required: !!this.inviteCode,
     }));

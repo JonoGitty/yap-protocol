@@ -10,7 +10,7 @@
 import { WebSocketServer, WebSocket } from "ws";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { URL } from "node:url";
-import { RegistrationServer } from "./registration.js";
+import { RegistrationError, RegistrationServer } from "./registration.js";
 import { join } from "node:path";
 
 const PORT = Number(process.env.YAP_PORT ?? 8789);
@@ -63,7 +63,7 @@ const httpServer = createServer((req: IncomingMessage, res: ServerResponse) => {
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({
       protocol: "yap/0.2",
-      registered_agents: 0, // TODO: wire to registration count
+      registered_agents: registration.getRegistrationCount(),
       online_agents: agents.size,
       registration_open: true,
       invite_required: !!INVITE_CODE,
@@ -79,10 +79,17 @@ const httpServer = createServer((req: IncomingMessage, res: ServerResponse) => {
 
   if (url.pathname === "/lookup" && req.method === "GET") {
     const handle = url.searchParams.get("handle");
+    if (!handle) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "handle parameter required" }));
+      return;
+    }
+    const agentHandle = handle?.startsWith("@") ? handle : `@${handle ?? ""}`;
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({
-      handle: handle?.startsWith("@") ? handle : `@${handle}`,
-      online: agents.has(handle?.startsWith("@") ? handle : `@${handle ?? ""}`),
+      handle: agentHandle,
+      registered: registration.isRegistered(agentHandle),
+      online: agents.has(agentHandle),
     }));
     return;
   }
@@ -111,42 +118,21 @@ async function handleRegister(req: IncomingMessage, res: ServerResponse): Promis
       return;
     }
 
-    if (!handle || handle.length < 2 || handle.length > 32) {
-      res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Handle must be 2-32 characters" }));
-      return;
-    }
-
-    if (!/^[a-zA-Z0-9_-]+$/.test(handle)) {
-      res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Handle must be alphanumeric (with - and _)" }));
-      return;
-    }
-
-    const agentHandle = `@${handle}`;
-
-    // Check uniqueness
-    if (agents.has(agentHandle)) {
-      res.writeHead(409, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Handle already taken" }));
-      return;
-    }
-
-    // For now, registration = just confirming the handle is valid
-    // Token auth will come when we persist registrations
-    const { randomBytes } = await import("node:crypto");
-    const token = randomBytes(32).toString("hex");
-
-    console.log(`📋 Registered: ${agentHandle}`);
+    const registrationResult = await registration.registerHandle(handle);
 
     res.writeHead(201, { "Content-Type": "application/json" });
     res.end(JSON.stringify({
-      handle: agentHandle,
-      token,
+      handle: registrationResult.handle,
+      token: registrationResult.token,
       tree_url: `wss://tree.yapprotocol.dev`,
       message: "Save this token — it cannot be recovered.",
     }));
-  } catch {
+  } catch (err) {
+    if (err instanceof RegistrationError) {
+      res.writeHead(err.statusCode, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: err.message }));
+      return;
+    }
     res.writeHead(400, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ error: "Invalid request body" }));
   }
@@ -185,6 +171,13 @@ wss.on("connection", (ws, req) => {
   }
 
   const agentHandle = `@${handle}`;
+  const token = url.searchParams.get("token");
+
+  if (!registration.verifyToken(agentHandle, token)) {
+    console.log(`🔒 ${agentHandle} rejected: invalid or missing auth token`);
+    ws.close(4003, "Authentication failed");
+    return;
+  }
 
   // Kick old session if duplicate (newest wins, like WhatsApp/Telegram)
   const existing = agents.get(agentHandle);

@@ -8,6 +8,7 @@
   "scripts": {
     "build": "npm run build --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
+    "typecheck": "tsc --noEmit",
     "tree": "npx tsx packages/tree/src/index.ts",
     "example:alice": "npx tsx examples/dinner-scheduler/alice.ts",
     "example:bob": "npx tsx examples/dinner-scheduler/bob.ts"

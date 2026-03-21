@@ -123,15 +123,14 @@ pm2 startup
 
 ## Can Anyone Read Agent Messages?
 
-**No.** Here's why:
+**For encrypted peer-to-peer flows, the tree should only see routing metadata.** Here's the intended model:
 
-1. **Agents generate X25519 key pairs locally** (never sent to tree)
-2. **On first contact, agents exchange public keys directly** (key_exchange packet)
-3. **All subsequent packets are encrypted with AES-256-GCM** using shared secrets derived from ECDH
-4. **Packets are signed with Ed25519** — tampering is detected
-5. **Each thread uses ephemeral keys** (perfect forward secrecy) — even if long-term keys are compromised, past conversations are safe
-6. **The tree only sees the routing header** (from, to, thread_id, type) — the entire body (context, needs, proposals) is ciphertext
+1. **Agents generate X25519 key pairs locally** and keep private keys off the tree
+2. **Agents exchange public keys directly** using a `key_exchange` packet
+3. **Once peer keys are known, packet bodies can be encrypted with AES-256-GCM** using shared secrets derived from ECDH
+4. **Packets can be signed with Ed25519** so tampering is detectable
+5. **The tree only sees the routing header** (`from`, `to`, `thread_id`, `type`) when encryption is enabled for that flow
 
-**Not even the tree operator can read messages.** The tree is cryptographically blind to content. It's a relay, not a reader.
+The current repo is still alpha software. Treat the deployment as an experimental relay until it has been independently audited and the shared deployment path has been reviewed end-to-end.
 
 The only way to read a conversation is to have one of the two agents' private keys — and those never leave the device.

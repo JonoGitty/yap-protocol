@@ -18,6 +18,11 @@ export interface YapSkillConfig {
   treeUrl: string;
   comfortZone: ComfortZone;
   userData?: Record<string, unknown>;
+  authToken?: string;
+  contactsPath?: string;
+  keystorePath?: string;
+  keystorePassphrase?: string;
+  blocklistPath?: string;
 }
 
 /**
@@ -43,6 +48,12 @@ export class YapSkill {
       comfortZone: config.comfortZone,
       prompter: this.prompter,
       userData: config.userData,
+      authToken: config.authToken,
+      contactsPath: config.contactsPath,
+      keystorePath: config.keystorePath,
+      keystorePassphrase: config.keystorePassphrase,
+      blocklistPath: config.blocklistPath,
+      platform: "openclaw-skill",
     });
   }
 

@@ -4,6 +4,8 @@
 
 Yap is an open protocol for AI agents to talk to each other on your behalf.
 
+> Yap is open-source alpha software. The core protocol, SDK, tree, Claude MCP server, and examples are working, but packaging, deployment hardening, and independent security review are still in progress.
+
 You tell your agent what you need. Your agent yaps at their agent. They negotiate, swap context, figure it out. You get a notification when they've agreed on something. One tap to confirm. Done.
 
 ## The problem
@@ -20,9 +22,9 @@ With Yap, Alice's agent sends Bob's agent a structured context packet: availabil
 
 Both humans get a simple confirmation. One tap. Done.
 
-## Live Public Tree
+## Public Alpha Tree
 
-The Yap tree is live at **`tree.yapprotocol.dev`**
+A shared alpha tree is available at **`tree.yapprotocol.dev`** for early testing.
 
 Anyone can register a handle and start yapping:
 
@@ -36,6 +38,8 @@ curl -X POST https://tree.yapprotocol.dev/register \
 ```
 
 Check tree status: https://tree.yapprotocol.dev/info
+
+If you use the shared tree, pass the returned token as `YAP_AUTH_TOKEN`.
 
 ## Get Started
 
@@ -51,7 +55,8 @@ Add this to your project's `.mcp.json` or Claude Desktop config:
       "args": ["tsx", "path/to/yap-protocol/packages/claude-mcp/src/index.ts"],
       "env": {
         "YAP_HANDLE": "yourname",
-        "YAP_TREE_URL": "wss://tree.yapprotocol.dev"
+        "YAP_TREE_URL": "wss://tree.yapprotocol.dev",
+        "YAP_AUTH_TOKEN": "paste-token-from-register"
       }
     }
   }
@@ -63,7 +68,31 @@ Restart Claude, then just talk naturally:
 
 Claude handles the rest — negotiation, consent prompts, proposals, confirmation.
 
-### Option 2: Use the SDK directly
+### Option 2: Use with OpenClaw (experimental)
+
+The OpenClaw integration is currently a package-level skill scaffold rather than a polished ClawHub release:
+
+```typescript
+import { YapSkill } from "@yap-protocol/openclaw-skill";
+
+const skill = new YapSkill({
+  handle: "alice",
+  treeUrl: "wss://tree.yapprotocol.dev",
+  authToken: process.env.YAP_AUTH_TOKEN,
+  keystorePath: "/path/to/.yap/keys.json",
+  comfortZone: {
+    always_share: ["timezone", "general_availability"],
+    ask_first: ["dietary", "budget_range"],
+    never_share: ["health_info", "financial_details"],
+  },
+});
+
+await skill.init((text) => console.log(text));
+```
+
+If you're sharing Yap with the OpenClaw community, see [docs/OPENCLAW_COMMUNITY_POST.md](docs/OPENCLAW_COMMUNITY_POST.md) for a short post draft and positioning notes.
+
+### Option 3: Use the SDK directly
 
 ```typescript
 import { YapAgent, AutoPrompter } from "@yap-protocol/sdk";
@@ -71,6 +100,8 @@ import { YapAgent, AutoPrompter } from "@yap-protocol/sdk";
 const agent = new YapAgent({
   handle: "alice",
   treeUrl: "wss://tree.yapprotocol.dev",
+  authToken: process.env.YAP_AUTH_TOKEN,
+  keystorePath: "/path/to/.yap/keys.json",
   comfortZone: {
     always_share: ["timezone", "general_availability"],
     ask_first: ["dietary", "budget_range"],
@@ -89,7 +120,7 @@ const threadId = await agent.startBranch("@bob", {
 ]);
 ```
 
-### Option 3: Run the examples locally
+### Option 4: Run the examples locally
 
 ```bash
 git clone https://github.com/JonoGitty/yap-protocol.git
@@ -116,18 +147,17 @@ Get notified when yaps arrive — even when you're not in Claude:
 
 Set up from within Claude: *"Set up Slack notifications for Yap"* — provide your webhook URL and you're done. Or set the `SLACK_WEBHOOK_URL` / `DISCORD_WEBHOOK_URL` env var.
 
-## Current Status
+## Project Status
 
-| Phase | What | Status |
-|-------|------|--------|
-| 1 | Tree, SDK, dinner scheduler | **Done** |
-| 2 | Negotiation loops, permissions, consent | **Done** |
-| 3 | Claude MCP server, OpenClaw skill | **Done** |
-| 4 | Encryption, multi-party, flock memory, nests, dynamic schemas | **Done** |
-| 5 | Security hardening (all vulnerabilities patched) | **Done** |
-| 5+ | Federation, handle registration, PFS | **Done** |
-| Deploy | Live tree at tree.yapprotocol.dev | **Live** |
-| — | Independent security audit | Planned |
+| Area | Status |
+|------|--------|
+| Core protocol flow + local examples | **Working alpha** |
+| Public tree + handle registration | **Working alpha** |
+| Claude MCP integration | **Working alpha** |
+| OpenClaw skill scaffold | **Experimental** |
+| Multi-party, nests, dynamic schemas, federation | **Experimental** |
+| npm / ClawHub packaging polish | **Planned** |
+| Independent security audit | **Not started** |
 
 ## Agent Agnostic
 
@@ -147,7 +177,7 @@ The tree doesn't know or care what's on either end. Like email doesn't care if y
 ## How it works
 
 1. Your agent connects to a **Tree** (relay server) via WebSocket
-2. Agents exchange keys automatically (E2E encrypted from first contact)
+2. Agents can exchange keys automatically so subsequent packets can be encrypted end-to-end
 3. Agents send each other **Yaps** (structured context packets)
 4. If an agent needs more info, it sends a **Chirp** (context request)
 5. Your agent checks your **Comfort Zone** (permission tiers) before sharing
@@ -158,10 +188,10 @@ The tree doesn't know or care what's on either end. Like email doesn't care if y
 ## What's built
 
 **SDK (19 modules, ~3,700 lines):**
-YapAgent, ComfortZone, ConsentPrompter, DynamicSchemaManager, FlockMemory, MultiPartyManager, NestManager, ContactList, ServiceDiscovery, YapCrypto (X25519 + AES-256-GCM + Ed25519 + PFS), Keystore, Security (sanitisation, replay, rate limiting, blocklist), AuditLog, and more.
+YapAgent, ComfortZone, ConsentPrompter, DynamicSchemaManager, FlockMemory, MultiPartyManager, NestManager, ContactList, ServiceDiscovery, YapCrypto (X25519 + AES-256-GCM + Ed25519 primitives), Keystore, Security (sanitisation, replay, rate limiting, blocklist), AuditLog, and more.
 
 **Tree (~250 lines):**
-WebSocket routing, offline queue (bounded, TTL), rate limiting, packet size limits, token auth, handle registration API, federation with signed hops.
+WebSocket routing, offline queue (bounded, TTL), rate limiting, packet size limits, token-backed registration/auth, federation hooks.
 
 **Integrations:**
 Claude MCP server (12 tools), OpenClaw skill, Slack/Discord/Email notifications.
@@ -172,11 +202,11 @@ Claude MCP server (12 tools), OpenClaw skill, Slack/Discord/Email notifications.
 
 See [SECURITY.md](SECURITY.md) for full details.
 
-**Built-in protections:** E2E encryption with auto key exchange, Ed25519 signing, PFS (ephemeral keys per thread), encrypted keystore at rest, token auth, prompt injection detection, replay detection, rate limiting, blocklist, comfort zone enforcement, packet size limits, coordinator verification, audit logging.
+**Built-in protections:** Token-backed tree auth, packet signing primitives, encrypted packet body support after key exchange, encrypted keystore at rest, prompt injection detection, replay detection, rate limiting, blocklist, comfort zone enforcement, packet size limits, coordinator verification, audit logging.
 
-**The tree cannot read your messages.** All content is encrypted end-to-end between agents. The tree only sees routing metadata (who talks to whom, when). Same model as Signal.
+**The tree is designed to be a dumb relay.** When agents are configured with keystores, Yap can encrypt packet bodies between peers after key exchange. The tree still sees routing metadata (who talks to whom, when).
 
-**Not yet done:** Independent security audit, metadata privacy (onion routing), full mTLS between federated trees.
+**Not yet done:** Independent security audit, metadata privacy (onion routing), full mTLS between federated trees, and a hardened production security review of the shared deployment path.
 
 ## Vocabulary
 
