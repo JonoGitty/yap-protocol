@@ -22,6 +22,8 @@ export interface ClientSecurityConfig {
   sanitisation?: boolean;
   /** Enable rate limiting. Default: true. */
   rateLimiting?: boolean;
+  /** Maximum allowed timestamp drift in ms. Default: 10 minutes. */
+  timestampDriftMs?: number;
 }
 
 export class YapClient {
@@ -31,6 +33,7 @@ export class YapClient {
   private disconnectCallbacks: Array<() => void> = [];
   private errorCallbacks: Array<(err: Error) => void> = [];
   private securityWarningCallbacks: Array<(warning: string, packet: YapPacket) => void> = [];
+  private rateLimitedCallbacks: Array<(agent: string, retryAfterMs: number) => void> = [];
   private intentionalClose = false;
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 5;
@@ -98,7 +101,7 @@ export class YapClient {
 
           // 3. Timestamp validation — DROP packets with excessive drift
           if (this.security.timestampValidation && yap.timestamp) {
-            const ts = validateTimestamp(yap.timestamp);
+            const ts = validateTimestamp(yap.timestamp, this.security.timestampDriftMs);
             if (!ts.valid) {
               this.emitSecurityWarning(`Timestamp rejected: ${ts.reason}`, yap);
               return; // Drop — prevents replay with old timestamps
@@ -108,7 +111,9 @@ export class YapClient {
           // 4. Rate limiting
           if (this.security.rateLimiting && yap.from) {
             if (this.rateLimiter.isLimited(yap.from)) {
-              this.emitSecurityWarning(`Rate limit exceeded for ${yap.from}`, yap);
+              const retryAfter = this.rateLimiter.retryAfterMs(yap.from);
+              this.emitSecurityWarning(`Rate limit exceeded for ${yap.from} (retry after ${Math.round(retryAfter / 1000)}s)`, yap);
+              for (const cb of this.rateLimitedCallbacks) cb(yap.from, retryAfter);
               return; // Drop rate-limited packets
             }
           }
@@ -234,6 +239,11 @@ export class YapClient {
   /** Subscribe to security warnings (prompt injection, replay, etc). */
   onSecurityWarning(callback: (warning: string, packet: YapPacket) => void): void {
     this.securityWarningCallbacks.push(callback);
+  }
+
+  /** Subscribe to rate-limit events with retry-after info. */
+  onRateLimited(callback: (agent: string, retryAfterMs: number) => void): void {
+    this.rateLimitedCallbacks.push(callback);
   }
 
   private emitSecurityWarning(warning: string, packet: YapPacket): void {

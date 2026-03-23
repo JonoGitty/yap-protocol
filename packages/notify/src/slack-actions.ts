@@ -8,6 +8,7 @@
  */
 
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { createHmac, timingSafeEqual } from "node:crypto";
 
 export interface SlackActionConfig {
   /** Port to listen on for Slack callbacks. */
@@ -58,8 +59,39 @@ export class SlackActionServer {
 
       const payload = JSON.parse(payloadStr);
 
-      // TODO: verify signing secret (crypto.timingSafeEqual with HMAC)
-      // For now, rely on the callback URL being secret.
+      // Verify Slack request signature (v0 signing)
+      if (this.config.signingSecret) {
+        const timestamp = req.headers["x-slack-request-timestamp"] as string;
+        const slackSig = req.headers["x-slack-signature"] as string;
+
+        if (!timestamp || !slackSig) {
+          res.writeHead(401);
+          res.end("Missing Slack signature headers");
+          return;
+        }
+
+        // Reject requests older than 5 minutes to prevent replay attacks
+        const age = Math.abs(Date.now() / 1000 - Number(timestamp));
+        if (age > 300) {
+          res.writeHead(401);
+          res.end("Request too old");
+          return;
+        }
+
+        const sigBasestring = `v0:${timestamp}:${body}`;
+        const mySignature = "v0=" + createHmac("sha256", this.config.signingSecret)
+          .update(sigBasestring)
+          .digest("hex");
+
+        if (
+          mySignature.length !== slackSig.length ||
+          !timingSafeEqual(Buffer.from(mySignature), Buffer.from(slackSig))
+        ) {
+          res.writeHead(401);
+          res.end("Invalid signature");
+          return;
+        }
+      }
 
       if (payload.type === "block_actions" && payload.actions?.length > 0) {
         const action = payload.actions[0];

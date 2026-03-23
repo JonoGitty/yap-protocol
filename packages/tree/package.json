@@ -4,11 +4,15 @@
   "description": "Yap relay server (the tree)",
   "type": "module",
   "main": "./src/index.ts",
+  "scripts": {
+    "test": "vitest run"
+  },
   "license": "MIT",
   "dependencies": {
     "ws": "^8.18.0"
   },
   "devDependencies": {
-    "@types/ws": "^8.5.13"
+    "@types/ws": "^8.5.13",
+    "vitest": "^4.1.0"
   }
 }

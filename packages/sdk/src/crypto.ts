@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-const { randomBytes, createCipheriv, createDecipheriv, createHash, generateKeyPairSync, createPrivateKey, createPublicKey, diffieHellman, sign: cryptoSign, verify: cryptoVerify } = crypto;
+const { randomBytes, createCipheriv, createDecipheriv, createHash, hkdfSync, generateKeyPairSync, createPrivateKey, createPublicKey, diffieHellman, sign: cryptoSign, verify: cryptoVerify } = crypto;
 import type { YapPacket } from "./types.js";
 
 /**
@@ -103,8 +103,10 @@ export function deriveSharedSecret(mySecretKey: string, theirPublicKey: string):
     type: "spki",
   });
   const shared = diffieHellman({ privateKey: myKey, publicKey: theirKey });
-  // Hash the shared secret for use as AES key
-  return createHash("sha256").update(shared).digest();
+  // Derive AES key using HKDF (stronger than raw SHA-256)
+  // Use the ECDH shared secret as IKM with a protocol-specific info string.
+  // Salt is empty (HKDF spec allows this — defaults to hash-length zeros).
+  return Buffer.from(hkdfSync("sha256", shared, Buffer.alloc(0), "yap-v0.2-session-key", 32));
 }
 
 // --- Encryption (AES-256-GCM) ---

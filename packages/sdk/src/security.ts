@@ -142,21 +142,24 @@ export class ReplayDetector {
 
 // --- Timestamp validation ---
 
-const MAX_TIMESTAMP_DRIFT_MS = 5 * 60 * 1000; // 5 minutes
+const DEFAULT_TIMESTAMP_DRIFT_MS = 10 * 60 * 1000; // 10 minutes
 
 /** Validate that a packet timestamp is reasonable. */
-export function validateTimestamp(timestamp: string): { valid: boolean; reason?: string } {
+export function validateTimestamp(
+  timestamp: string,
+  maxDriftMs: number = DEFAULT_TIMESTAMP_DRIFT_MS,
+): { valid: boolean; drift?: number; reason?: string } {
   const ts = new Date(timestamp).getTime();
   if (isNaN(ts)) return { valid: false, reason: "Invalid timestamp format" };
 
   const now = Date.now();
   const drift = Math.abs(now - ts);
 
-  if (drift > MAX_TIMESTAMP_DRIFT_MS) {
-    return { valid: false, reason: `Timestamp drift too large: ${Math.round(drift / 1000)}s` };
+  if (drift > maxDriftMs) {
+    return { valid: false, drift, reason: `Timestamp drift too large: ${Math.round(drift / 1000)}s (max ${Math.round(maxDriftMs / 1000)}s)` };
   }
 
-  return { valid: true };
+  return { valid: true, drift };
 }
 
 // --- Rate limiting ---
@@ -181,6 +184,14 @@ export class RateLimiter {
 
     entry.count++;
     return entry.count > this.maxPerWindow;
+  }
+
+  /** Returns ms remaining in the current rate-limit window for an agent, or 0 if not limited. */
+  retryAfterMs(agentHandle: string): number {
+    const entry = this.counts.get(agentHandle);
+    if (!entry || entry.count <= this.maxPerWindow) return 0;
+    const elapsed = Date.now() - entry.windowStart;
+    return Math.max(0, this.windowMs - elapsed);
   }
 }
 

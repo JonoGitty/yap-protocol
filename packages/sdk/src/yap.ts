@@ -219,6 +219,24 @@ export function createNestUpdate(
   };
 }
 
+export function createSessionEnd(
+  threadId: string,
+  from: string,
+  to: string,
+  reason: "completed" | "cancelled" | "timeout" | "user_request" = "completed",
+): YapPacket {
+  return {
+    protocol: PROTOCOL_VERSION,
+    packet_id: generateId("pkt"),
+    thread_id: threadId,
+    from,
+    to,
+    timestamp: new Date().toISOString(),
+    type: "session_end",
+    session_end_reason: reason,
+  };
+}
+
 export function validateYap(yap: unknown): { valid: boolean; errors: string[] } {
   const errors: string[] = [];
 

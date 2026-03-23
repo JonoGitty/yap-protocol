@@ -19,6 +19,7 @@ export interface YapPacket {
     | "schema_proposal"
     | "schema_response"
     | "schema_confirmed"
+    | "session_end"
     | "error";
   intent?: Intent;
   context?: Record<string, unknown>;
@@ -29,6 +30,9 @@ export interface YapPacket {
   proposal?: Proposal;
   status?: "confirmed" | "declined";
   reason_class?: string;
+
+  // Session termination
+  session_end_reason?: "completed" | "cancelled" | "timeout" | "user_request";
 
   // Version handshake (Step 2)
   capabilities?: Capabilities;

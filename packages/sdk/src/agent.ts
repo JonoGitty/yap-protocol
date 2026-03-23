@@ -26,6 +26,7 @@ import {
   createConfirmation,
   createDecline,
   createKeyExchange,
+  createSessionEnd,
   generateId,
 } from "./yap.js";
 import { LOCAL_CAPABILITIES, negotiateVersion } from "./version.js";
@@ -101,6 +102,7 @@ export class YapAgent {
   private schemaProposalHandler?: (threadId: string, extension: Record<string, unknown>, reason: string, from: string) => void;
   private schemaResponseHandler?: (threadId: string, status: string, modifications: Record<string, unknown> | undefined, from: string) => void;
   private schemaConfirmedHandler?: (threadId: string, schemaName: string, from: string) => void;
+  private sessionEndHandler?: (threadId: string, reason: string, from: string) => void;
 
   constructor(config: AgentConfig) {
     this.handle = config.handle.startsWith("@") ? config.handle : `@${config.handle}`;
@@ -423,6 +425,25 @@ export class YapAgent {
     this.schemaConfirmedHandler = handler;
   }
 
+  onSessionEnd(handler: (threadId: string, reason: string, from: string) => void): void {
+    this.sessionEndHandler = handler;
+  }
+
+  /** Explicitly end a session/thread. Cleans up timers and ephemeral keys. */
+  endSession(
+    threadId: string,
+    to: string,
+    reason: "completed" | "cancelled" | "timeout" | "user_request" = "completed",
+  ): void {
+    const packet = createSessionEnd(threadId, this.handle, to, reason);
+    this.branches.addPacket(threadId, packet);
+    this.branches.updateState(threadId, "COMPLETED");
+    this.clearTimeout(threadId);
+    this.threadUrgency.delete(threadId);
+    this.threadCoordinators.delete(threadId);
+    this.client.send(packet);
+  }
+
   /** Get the negotiated capabilities for a remote agent. */
   getRemoteCapabilities(agent: string): Capabilities | undefined {
     return this.remoteCapabilities.get(agent);
@@ -549,6 +570,13 @@ export class YapAgent {
         if (yap.coordinator) {
           this.threadCoordinators.set(threadId, yap.coordinator);
         }
+        break;
+      case "session_end":
+        this.branches.updateState(threadId, "COMPLETED");
+        this.clearTimeout(threadId);
+        this.threadUrgency.delete(threadId);
+        this.threadCoordinators.delete(threadId);
+        this.sessionEndHandler?.(threadId, yap.session_end_reason ?? "completed", yap.from);
         break;
       case "error":
         this.errorHandler?.({

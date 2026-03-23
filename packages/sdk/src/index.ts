@@ -27,6 +27,7 @@ export {
   createFork,
   createKeyExchange,
   createNestUpdate,
+  createSessionEnd,
   generateId,
   validateYap,
 } from "./yap.js";
