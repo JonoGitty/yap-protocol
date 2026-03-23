@@ -7,6 +7,9 @@
   "bin": {
     "yap-mcp": "./src/index.ts"
   },
+  "scripts": {
+    "test": "vitest run"
+  },
   "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.1",
@@ -14,6 +17,7 @@
   },
   "devDependencies": {
     "@types/ws": "^8.5.13",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "vitest": "^4.1.0"
   }
 }
